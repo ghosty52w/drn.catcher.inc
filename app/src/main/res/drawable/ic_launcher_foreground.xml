@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- arms -->
+    <path
+        android:pathData="M44,50L34,42M64,50L74,42M54,60L54,63"
+        android:strokeWidth="3"
+        android:strokeColor="#37474F"
+        android:strokeLineCap="round" />
+    <!-- rotors -->
+    <path
+        android:fillColor="#ECEFF1"
+        android:pathData="M23,40a11,3.5 0 1,0 22,0a11,3.5 0 1,0 -22,0zM63,40a11,3.5 0 1,0 22,0a11,3.5 0 1,0 -22,0z" />
+    <!-- body -->
+    <path
+        android:fillColor="#37474F"
+        android:pathData="M44,47h20a4,4 0 0,1 4,4v5a4,4 0 0,1 -4,4h-20a4,4 0 0,1 -4,-4v-5a4,4 0 0,1 4,-4z" />
+    <path
+        android:fillColor="#FF5252"
+        android:pathData="M52,51h4v4h-4z" />
+    <!-- egg -->
+    <path
+        android:fillColor="#FFF3D6"
+        android:pathData="M47,71a7,9 0 1,0 14,0a7,9 0 1,0 -14,0z" />
+</vector>

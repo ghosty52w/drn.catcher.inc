@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Drone Catcher</string>
+    <string name="accessibility_label">Drone Catcher taps</string>
+    <string name="accessibility_description">Lets Drone Catcher tap the drones it spots in Egg, Inc. It only taps while catching is switched on in the app and, by default, only while Egg, Inc. is the app on screen. It is used to check which app is open and to send taps; it does not read or store anything you type.</string>
+</resources>
