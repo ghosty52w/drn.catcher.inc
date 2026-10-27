@@ -8,10 +8,13 @@ import kotlin.math.min
 /**
  * Finds drones in a stream of downscaled screen captures.
  *
- * A drone is a small object that moves steadily across the sky. The detector keeps a
- * running background model of the search region, marks pixels that differ from it,
- * groups them into blobs, and follows blobs from frame to frame. A blob that has been
- * seen in several frames, is drone-sized and moves at drone-like speed becomes a target.
+ * A drone is a small object that flies in from the edge and across the sky. The detector
+ * keeps a running background model of the search region, marks pixels that differ from it,
+ * groups them into blobs, and follows blobs from frame to frame. A blob becomes a target
+ * only once it has entered from the edge of the region and flown a real distance in a
+ * fairly straight, mostly sideways line at drone-like speed: animated buildings and buttons
+ * stay put and wobble in place, and floating text rises straight up.
+ * Pixels that keep changing (looping animations) are learned and ignored.
  * The returned tap point is led ahead along its velocity to make up for capture latency.
  *
  * Plain Kotlin with no Android dependencies so it can be unit-tested on the JVM.
@@ -32,7 +35,21 @@ class DroneDetector(val width: Int, val height: Int) {
         val minSpeed: Float = 0.04f,
         val maxSpeed: Float = 2.5f,
         /** Frames a blob must be seen in before it is tapped. */
-        val confirmHits: Int = 3,
+        val confirmHits: Int = 4,
+        /** Distance a blob must have flown since it appeared, in screen widths. */
+        val minTravel: Float = 0.08f,
+        /** Straight-line distance over distance travelled; wobbling things score low. */
+        val minStraightness: Float = 0.7f,
+        /** Largest vertical share of the flight direction (1 = straight up/down allowed). */
+        val maxVerticalShare: Float = 0.87f,
+        /** No taps for this long after the whole scene changes (a menu opening/closing). */
+        val settleMs: Int = 1200,
+        /** Only tap things that first appeared near the left/right edge or the region's top/bottom. */
+        val requireEdgeEntry: Boolean = true,
+        /** How close to the left/right edge (in screen widths) counts as entering from it. */
+        val edgeMargin: Float = 0.15f,
+        /** Give up on something after tapping it this many times without it disappearing. */
+        val maxTapsPerTrack: Int = 3,
         /** How far ahead (in ms) to aim along the drone's path. */
         val leadMs: Int = 100,
     )
@@ -43,6 +60,10 @@ class DroneDetector(val width: Int, val height: Int) {
     private class Blob(val cx: Float, val cy: Float, val size: Float)
 
     private class Track(val id: Int, var x: Float, var y: Float, var size: Float, var lastMs: Long) {
+        val originX = x
+        val originY = y
+        var pathLength = 0f
+        var taps = 0
         var vx = 0f
         var vy = 0f
         var hits = 1
@@ -54,6 +75,7 @@ class DroneDetector(val width: Int, val height: Int) {
     private val n = width * height
     private val bg = FloatArray(n * 3)
     private val fg = ByteArray(n)
+    private val activity = FloatArray(n)
     private val stack = IntArray(n)
     private val tracks = ArrayList<Track>()
     private val zones = ArrayList<Zone>()
@@ -61,6 +83,10 @@ class DroneDetector(val width: Int, val height: Int) {
     private var bgTop = -1
     private var bgBottom = -1
     private var nextId = 1
+
+    /** When the last whole-scene change was seen, e.g. a menu opening. */
+    var lastSceneChangeMs = Long.MIN_VALUE
+        private set
 
     /** Forget the background and all tracks; the next frame re-seeds the model. */
     fun reset() {
@@ -70,13 +96,13 @@ class DroneDetector(val width: Int, val height: Int) {
     }
 
     /**
-     * Ignore detections near a point for a while, e.g. right after tapping it, so the
-     * explosion animation of a caught drone is not tapped again.
+     * Records a tap on [target]: detections near it are ignored for a while, so the
+     * explosion of a caught drone is not tapped. If the drone was missed it keeps being
+     * tracked and is tried again later, up to [Params.maxTapsPerTrack] times.
      */
-    fun suppressAt(x: Float, y: Float, nowMs: Long, radiusFrac: Float = 0.12f, durationMs: Long = 900L) {
-        val r = width * radiusFrac
-        zones.add(Zone(x, y, r, nowMs + durationMs))
-        tracks.removeAll { hypot(it.x - x, it.y - y) < r }
+    fun onTapped(target: Target, nowMs: Long, radiusFrac: Float = 0.12f, durationMs: Long = 900L) {
+        zones.add(Zone(target.x, target.y, width * radiusFrac, nowMs + durationMs))
+        tracks.find { it.id == target.trackId }?.let { it.taps++ }
     }
 
     /**
@@ -97,6 +123,7 @@ class DroneDetector(val width: Int, val height: Int) {
         if (moving > (bottom - top) * width * SCENE_CHANGE_FRACTION) {
             // A menu opened, the screen scrolled, or similar: start over on the new scene.
             seed(px, top, bottom)
+            lastSceneChangeMs = nowMs
             return null
         }
 
@@ -104,11 +131,25 @@ class DroneDetector(val width: Int, val height: Int) {
         updateTracks(blobs, nowMs, p)
         zones.removeAll { it.untilMs <= nowMs }
 
+        if (lastSceneChangeMs != Long.MIN_VALUE && nowMs - lastSceneChangeMs < p.settleMs) return null
+
+        val edge = p.edgeMargin * width
+        val vEdge = EDGE_MARGIN_VERTICAL * width
         var best: Track? = null
         for (t in tracks) {
-            if (t.lastMs != nowMs || t.hits < p.confirmHits) continue
+            if (t.lastMs != nowMs || t.hits < p.confirmHits || t.taps >= p.maxTapsPerTrack) continue
+            if (p.requireEdgeEntry &&
+                t.originX > edge && t.originX < width - 1 - edge &&
+                t.originY > top + vEdge && t.originY < bottom - 1 - vEdge
+            ) continue
             val speed = hypot(t.vx, t.vy) / width
             if (speed < p.minSpeed || speed > p.maxSpeed) continue
+            val dx = t.x - t.originX
+            val dy = t.y - t.originY
+            val travel = hypot(dx, dy)
+            if (travel < p.minTravel * width) continue
+            if (travel < p.minStraightness * t.pathLength) continue
+            if (abs(dy) > p.maxVerticalShare * travel) continue
             if (zones.any { hypot(t.x - it.x, t.y - it.y) < it.r }) continue
             if (best == null || t.hits > best.hits) best = t
         }
@@ -134,7 +175,11 @@ class DroneDetector(val width: Int, val height: Int) {
         tracks.clear()
     }
 
-    /** Marks pixels that differ from the background and updates the background. */
+    /**
+     * Marks pixels that differ from the background and updates the background.
+     * Returns how many pixels changed, including ones in busy (always-animating) areas,
+     * which are counted but not marked.
+     */
     private fun markMovingPixels(px: IntArray, top: Int, bottom: Int, threshold: Float, exclude: IntArray?): Int {
         var count = 0
         for (y in top until bottom) {
@@ -149,14 +194,17 @@ class DroneDetector(val width: Int, val height: Int) {
                 val j = i * 3
                 val d = max(abs(r - bg[j]), max(abs(g - bg[j + 1]), abs(b - bg[j + 2])))
                 val isMoving = d > threshold && !(excludedRow && x >= exclude!![0] && x < exclude[2])
+                val busy = activity[i] > BUSY_ACTIVITY
                 val alpha: Float
                 if (isMoving) {
-                    fg[i] = MOVING
+                    fg[i] = if (busy) STILL else MOVING
                     count++
                     alpha = FG_ALPHA
+                    activity[i] += (1f - activity[i]) * ACTIVITY_ALPHA
                 } else {
                     fg[i] = STILL
                     alpha = BG_ALPHA
+                    activity[i] -= activity[i] * ACTIVITY_ALPHA
                 }
                 bg[j] += (r - bg[j]) * alpha
                 bg[j + 1] += (g - bg[j + 1]) * alpha
@@ -246,6 +294,7 @@ class DroneDetector(val width: Int, val height: Int) {
                 best.vx = best.vx * 0.4f + nvx * 0.6f
                 best.vy = best.vy * 0.4f + nvy * 0.6f
             }
+            best.pathLength += hypot(b.cx - best.x, b.cy - best.y)
             best.x = b.cx
             best.y = b.cy
             best.size = b.size
@@ -268,11 +317,22 @@ class DroneDetector(val width: Int, val height: Int) {
         /** More than this fraction of the region moving at once means the scene changed. */
         const val SCENE_CHANGE_FRACTION = 0.20f
 
+        /**
+         * Pixels that were moving in more than this share of recent frames (roughly the
+         * last 10 s) are looping animations, not drones, and are ignored.
+         */
+        const val ACTIVITY_ALPHA = 0.01f
+        const val BUSY_ACTIVITY = 0.12f
+
         /** Moving pixels up to this far apart belong to the same blob. */
         const val GAP = 2
         const val MIN_FILL = 0.10f
         const val MAX_ASPECT = 4
 
-        const val TRACK_TIMEOUT_MS = 350L
+        /** How close to the region's top/bottom (in screen widths) counts as entering from it. */
+        const val EDGE_MARGIN_VERTICAL = 0.06f
+
+        /** A track survives this long without being seen, e.g. while crossing a busy area. */
+        const val TRACK_TIMEOUT_MS = 600L
     }
 }

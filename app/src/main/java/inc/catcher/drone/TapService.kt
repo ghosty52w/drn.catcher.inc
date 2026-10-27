@@ -107,6 +107,8 @@ class TapService : AccessibilityService() {
         return dispatchGesture(gesture, null, null)
     }
 
+    fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
+
     fun mark(x: Float, y: Float) = ensureMarkers()?.addMark(x, y)
 
     /** Highlights the search area for a few seconds. Fractions of the screen height. */

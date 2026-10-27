@@ -31,6 +31,8 @@ object Prefs {
     val MIN_SIZE = Slider("min_size", "Smallest drone", 1, 30, 5, "% of width",
         "Raise this if it taps chickens or sparkles.")
     val MAX_SIZE = Slider("max_size", "Largest drone", 5, 50, 22, "% of width", "")
+    val MIN_TRAVEL = Slider("min_travel", "Shortest flight", 0, 40, 8, "% of width",
+        "How far something must fly before it's tapped. Raise if it taps animations.")
     val MIN_SPEED = Slider("min_speed", "Slowest drone", 0, 50, 4, "% of width/s",
         "Things slower than this (clouds, counters) are ignored.")
     val LEAD = Slider("lead_ms", "Aim ahead", 0, 400, 100, "ms",
@@ -41,13 +43,15 @@ object Prefs {
     val SCALE = Slider("scale", "Downscale", 2, 8, 4, "x",
         "Capture resolution divider. Applies on next start.")
 
-    val SLIDERS = listOf(ROI_TOP, ROI_BOTTOM, THRESHOLD, MIN_SIZE, MAX_SIZE, MIN_SPEED, LEAD, COOLDOWN, FPS, SCALE)
+    val SLIDERS = listOf(ROI_TOP, ROI_BOTTOM, THRESHOLD, MIN_SIZE, MAX_SIZE, MIN_TRAVEL, MIN_SPEED, LEAD, COOLDOWN, FPS, SCALE)
 
     val ONLY_EGG = Toggle("only_egg", "Only tap while Egg, Inc. is on screen", true)
     val LAUNCH_EGG = Toggle("launch_egg", "Open Egg, Inc. after starting", true)
     val MARKERS = Toggle("markers", "Show a ring where it taps", true)
+    val EDGE_ENTRY = Toggle("edge_entry", "Only tap things that fly in from the side", true)
+    val AUTO_BACK = Toggle("auto_back", "Press Back if a tap opens a menu", true)
 
-    val TOGGLES = listOf(ONLY_EGG, LAUNCH_EGG, MARKERS)
+    val TOGGLES = listOf(ONLY_EGG, EDGE_ENTRY, AUTO_BACK, LAUNCH_EGG, MARKERS)
 
     fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -73,6 +77,8 @@ object Prefs {
             minSize = minSize / 100f,
             maxSize = maxSize / 100f,
             minSpeed = get(ctx, MIN_SPEED) / 100f,
+            minTravel = get(ctx, MIN_TRAVEL) / 100f,
+            requireEdgeEntry = get(ctx, EDGE_ENTRY),
             leadMs = get(ctx, LEAD),
         )
     }

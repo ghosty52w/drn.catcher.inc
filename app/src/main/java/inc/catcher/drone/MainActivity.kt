@@ -32,7 +32,8 @@ class MainActivity : Activity() {
 • Tap the floating 🛸 button to pause or resume. Long-press it to stop. Drag it out of the way.
 • Use "Preview search area" to check the blue box covers the sky where drones fly, but not the money counter, chickens, trucks or buttons.
 • Missing drones? Lower "Motion threshold" or "Smallest drone". Taps landing behind drones? Raise "Aim ahead".
-• Tapping things that aren't drones? Raise "Motion threshold" or "Smallest drone", or shrink the search area.
+• Tapping things that aren't drones? Raise "Shortest flight", "Motion threshold" or "Smallest drone", or shrink the search area.
+• Not tapping drones at all? Try turning off "Only tap things that fly in from the side".
 • Taps only happen while Egg, Inc. is on screen (unless you turn that off below)."""
     }
 
@@ -113,6 +114,9 @@ class MainActivity : Activity() {
                     else -> "🛸 Catching · ${capture.taps} taps"
                 },
             )
+            if (capture != null && capture.menusClosed > 0) {
+                append("\n↩ Closed ${capture.menusClosed} menus opened by mistake")
+            }
             if (eggIncLaunchIntent() == null) append("\n⚠ Egg, Inc. isn't installed on this device")
         }
     }

@@ -36,6 +36,9 @@ class CaptureService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val SETTINGS_REFRESH_MS = 1000L
 
+        /** A whole-screen change this soon after our tap means the tap opened a menu. */
+        private const val MENU_WINDOW_MS = 1500L
+
         @Volatile
         var instance: CaptureService? = null
             private set
@@ -48,6 +51,14 @@ class CaptureService : Service() {
     @Volatile
     var taps = 0
         private set
+
+    @Volatile
+    var menusClosed = 0
+        private set
+
+    /** When the last tap was actually sent (main thread clock = uptime). */
+    @Volatile
+    private var lastSentTapMs = 0L
 
     private val main = Handler(Looper.getMainLooper())
     private var projection: MediaProjection? = null
@@ -67,11 +78,13 @@ class CaptureService : Service() {
     private var lastFrameMs = 0L
     private var lastTapMs = 0L
     private var lastSettingsMs = 0L
+    private var lastTapClosedMs = 0L
     private var params = DroneDetector.Params()
     private var frameIntervalMs = 83L
     private var cooldownMs = 450L
     private var onlyEgg = true
     private var showMarks = true
+    private var autoBack = true
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -186,6 +199,7 @@ class CaptureService : Service() {
         cooldownMs = Prefs.get(this, Prefs.COOLDOWN).toLong()
         onlyEgg = Prefs.get(this, Prefs.ONLY_EGG)
         showMarks = Prefs.get(this, Prefs.MARKERS)
+        autoBack = Prefs.get(this, Prefs.AUTO_BACK)
     }
 
     private fun onImage(r: ImageReader) {
@@ -230,10 +244,11 @@ class CaptureService : Service() {
                 }
             }
 
-            val target = det.process(px, now, params, excludedRect()) ?: return
-            if (now - lastTapMs < cooldownMs) return
+            val target = det.process(px, now, params, excludedRect())
+            closeMenuIfWeOpenedOne(det)
+            if (target == null || now - lastTapMs < cooldownMs) return
             lastTapMs = now
-            det.suppressAt(target.x, target.y, now)
+            det.onTapped(target, now)
 
             val sx = target.x * screenW / capW
             val sy = target.y * screenH / capH
@@ -244,6 +259,7 @@ class CaptureService : Service() {
                 if (paused || instance == null) return@post
                 if (requireEgg && !svc.isEggIncForeground()) return@post
                 if (svc.tap(sx, sy)) {
+                    lastSentTapMs = SystemClock.uptimeMillis()
                     taps++
                     if (mark) svc.mark(sx, sy)
                     refreshControls()
@@ -251,6 +267,27 @@ class CaptureService : Service() {
             }
         } finally {
             image.close()
+        }
+    }
+
+    /**
+     * If the whole screen changed right after one of our taps, the tap probably hit a
+     * building or button and opened a menu: press Back once to close it.
+     */
+    private fun closeMenuIfWeOpenedOne(det: DroneDetector) {
+        val tapAt = lastSentTapMs
+        val changedAt = det.lastSceneChangeMs
+        if (!autoBack || tapAt == 0L || tapAt == lastTapClosedMs) return
+        if (changedAt <= tapAt || changedAt - tapAt > MENU_WINDOW_MS) return
+        lastTapClosedMs = tapAt
+        val requireEgg = onlyEgg
+        main.post {
+            val svc = TapService.instance ?: return@post
+            if (requireEgg && !svc.isEggIncForeground()) return@post
+            if (svc.pressBack()) {
+                menusClosed++
+                refreshControls()
+            }
         }
     }
 

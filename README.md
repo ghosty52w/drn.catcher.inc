@@ -46,16 +46,22 @@ bottom. Adjust **Search area top / bottom** until it does.
 | Misses drones | Lower **Motion threshold** or **Smallest drone** |
 | Taps land behind drones | Raise **Aim ahead** |
 | Taps land in front of drones | Lower **Aim ahead** |
-| Taps things that aren't drones | Raise **Motion threshold** or **Smallest drone**, or shrink the search area |
+| Taps things that aren't drones | Raise **Shortest flight**, **Motion threshold** or **Smallest drone**, or shrink the search area |
+| Never taps drones at all | Turn off **Only tap things that fly in from the side** |
 | Battery drain | Lower **Checks per second** or raise **Downscale** |
 
 ## How it works
 
 - `CaptureService` mirrors the screen into a small (¼ size by default) image about 12 times a second.
 - `DroneDetector` keeps a slowly updating background picture of the search area, marks pixels
-  that changed, groups them into blobs, and follows blobs across frames. A blob that is
-  drone-sized, seen in 3+ frames, and moving at drone speed is a target. Big sudden changes
-  (menus opening) reset the model instead of triggering taps.
+  that changed, groups them into blobs, and follows blobs across frames. A blob is only tapped
+  once it has flown in from the side, travelled a real distance in a fairly straight, mostly
+  sideways line, and is drone-sized and drone-fast. Animated buildings and buttons wobble or
+  spin in place, so they don't qualify; areas that animate constantly are learned and ignored.
+  Big sudden changes (menus opening) reset the model, and nothing is tapped until the screen
+  settles.
+- If the screen changes completely right after a tap, that tap probably opened a menu, so it
+  presses Back once to close it (can be switched off).
 - `TapService` (accessibility service) taps the predicted position, draws a brief ring there,
   and checks Egg, Inc. is in the foreground.
 
