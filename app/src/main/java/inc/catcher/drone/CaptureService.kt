@@ -45,6 +45,9 @@ class CaptureService : Service() {
         private const val MENU_CHECK_UNTIL_MS = 2000L
         private const val MENU_DIFFERENCE = 0.35f
 
+        /** The menu counts as closed once the screen is this close to how it looked before the tap. */
+        private const val MENU_CLOSED_DIFFERENCE = 0.2f
+
         /** How long after pressing Back to check we're still in Egg, Inc. */
         private const val BACK_VERIFY_MS = 900L
 
@@ -63,6 +66,11 @@ class CaptureService : Service() {
 
     @Volatile
     var menusClosed = 0
+        private set
+
+    /** A tap of ours opened a menu that is still open; no taps until it closes. */
+    @Volatile
+    var menuOpen = false
         private set
 
     /** Set when Back took us out of Egg, Inc. instead of closing a menu. */
@@ -94,6 +102,9 @@ class CaptureService : Service() {
     private var lastSettingsMs = 0L
     private var beforeTapSignature: IntArray? = null
     private var beforeTapMs = 0L
+    private var beforeTapX = 0f
+    private var beforeTapY = 0f
+    private var menuBaseline: IntArray? = null
     private var params = DroneDetector.Params()
     private var frameIntervalMs = 83L
     private var cooldownMs = 450L
@@ -185,8 +196,9 @@ class CaptureService : Service() {
         return "${det.tappedCount} drones tapped" + if (skipped.isEmpty()) "" else " · skipped: $skipped"
     }
 
+    /** Floating button tap: dismisses the "menu open" wait if there is one, else pauses/resumes. */
     fun togglePause() {
-        paused = !paused
+        if (menuOpen) menuOpen = false else paused = !paused
         refreshControls()
     }
 
@@ -196,8 +208,12 @@ class CaptureService : Service() {
     }
 
     fun refreshControls() {
-        val label = if (paused) "⏸ $taps" else "🛸 $taps"
-        val active = !paused
+        val label = when {
+            paused -> "⏸ $taps"
+            menuOpen -> "⏸ menu"
+            else -> "🛸 $taps"
+        }
+        val active = !paused && !menuOpen
         main.post { TapService.instance?.setControlsState(label, active) }
     }
 
@@ -229,6 +245,7 @@ class CaptureService : Service() {
         onlyEgg = Prefs.get(this, Prefs.ONLY_EGG)
         showMarks = Prefs.get(this, Prefs.MARKERS)
         autoBack = Prefs.get(this, Prefs.AUTO_BACK)
+        detector?.setAvoidSpots(Prefs.avoidSpots(this))
     }
 
     private fun onImage(r: ImageReader) {
@@ -274,12 +291,14 @@ class CaptureService : Service() {
             }
 
             val target = det.process(px, now, params, excludedRect())
-            closeMenuIfWeOpenedOne(det, px, now)
-            if (target == null || now - lastTapMs < cooldownMs) return
+            watchForMenu(det, px, now)
+            if (menuOpen || target == null || now - lastTapMs < cooldownMs) return
             lastTapMs = now
             det.onTapped(target, now)
             beforeTapSignature = det.signature(px, params)
             beforeTapMs = now
+            beforeTapX = target.x
+            beforeTapY = target.y
 
             val sx = target.x * screenW / capW
             val sy = target.y * screenH / capH
@@ -302,11 +321,24 @@ class CaptureService : Service() {
     }
 
     /**
-     * If one of our taps hit a building or button and opened a menu, press Back once to
-     * close it. A menu is assumed only if the screen changed wholesale after the tap and,
-     * most of a second later, still looks very different from just before the tap.
+     * Notices when one of our taps hit a building or button and opened a menu: most of a
+     * second later, the screen still looks very different from just before the tap. The spot is then remembered and never tapped again,
+     * tapping stops until the screen looks like it did before the tap (the menu was
+     * closed), and, if allowed, Back is pressed to close it.
      */
-    private fun closeMenuIfWeOpenedOne(det: DroneDetector, px: IntArray, now: Long) {
+    private fun watchForMenu(det: DroneDetector, px: IntArray, now: Long) {
+        val baseline = menuBaseline
+        if (baseline != null) {
+            // Cleared from the floating button: the player says carry on.
+            if (!menuOpen) {
+                menuBaseline = null
+            } else if (DroneDetector.signatureDifference(baseline, det.signature(px, params)) < MENU_CLOSED_DIFFERENCE) {
+                menuOpen = false
+                menuBaseline = null
+                refreshControls()
+            }
+            return
+        }
         val before = beforeTapSignature ?: return
         val sentAt = lastSentTapMs
         if (sentAt < beforeTapMs) {
@@ -316,9 +348,24 @@ class CaptureService : Service() {
         }
         if (now - sentAt < MENU_CHECK_AFTER_MS) return
         beforeTapSignature = null
-        if (!autoBack || now - sentAt > MENU_CHECK_UNTIL_MS) return
-        if (det.lastSceneChangeMs < sentAt) return
+        if (now - sentAt > MENU_CHECK_UNTIL_MS) return
         if (DroneDetector.signatureDifference(before, det.signature(px, params)) < MENU_DIFFERENCE) return
+
+        Prefs.addAvoidSpot(this, beforeTapX / capW, beforeTapY / capH)
+        det.setAvoidSpots(Prefs.avoidSpots(this))
+        menuBaseline = before
+        menuOpen = true
+        refreshControls()
+        if (!autoBack) {
+            main.post {
+                Toast.makeText(
+                    this,
+                    "A tap opened a menu. Close it and catching carries on (that spot won't be tapped again).",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            return
+        }
         main.post {
             val svc = TapService.instance ?: return@post
             if (!svc.isEggIncForeground() || !svc.pressBack()) return@post

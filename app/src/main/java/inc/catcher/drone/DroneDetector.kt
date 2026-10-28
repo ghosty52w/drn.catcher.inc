@@ -79,6 +79,7 @@ class DroneDetector(val width: Int, val height: Int) {
         TOO_VERTICAL("flying too steeply up or down"),
         TURNING("kept changing direction"),
         GAVE_UP("still there after every retry"),
+        AVOIDED_SPOT("over a spot where a tap once opened a menu"),
     }
 
     private class Blob(val cx: Float, val cy: Float, val size: Float)
@@ -126,6 +127,22 @@ class DroneDetector(val width: Int, val height: Int) {
         private set
 
     fun skipCount(reason: Skip): Int = skipCounts[reason.ordinal]
+
+    /** Spots never to tap, as (x, y) fractions of the screen. */
+    private var avoidSpots: List<FloatArray> = emptyList()
+
+    /**
+     * Sets spots never to tap, as (x, y) fractions of the screen, e.g. buildings where a
+     * tap once opened a menu.
+     */
+    fun setAvoidSpots(spots: List<FloatArray>) {
+        avoidSpots = spots
+    }
+
+    private fun isAvoided(x: Float, y: Float): Boolean {
+        val r = AVOID_RADIUS * width
+        return avoidSpots.any { hypot(x - it[0] * width, y - it[1] * height) < r }
+    }
 
     /** When the last whole-scene change was seen, e.g. a menu opening. */
     var lastSceneChangeMs = Long.MIN_VALUE
@@ -183,21 +200,27 @@ class DroneDetector(val width: Int, val height: Int) {
 
         val edge = p.edgeMargin * width
         val vEdge = EDGE_MARGIN_VERTICAL * width
-        var best: Track? = null
+        var best: Target? = null
+        var bestHits = 0
         for (t in tracks) {
             if (t.lastMs != nowMs || t.hits < p.confirmHits) continue
             t.lastSkip = skipReason(t, p, top, bottom, edge, vEdge)
             if (t.lastSkip != null) continue
             if (zones.any { hypot(t.x - it.x, t.y - it.y) < it.r }) continue
-            if (best == null || t.hits > best.hits) best = t
+            // If earlier taps missed, the aim was probably off: try further ahead, then behind.
+            val lead = p.leadMs / 1000f * RETRY_LEAD[min(t.taps, RETRY_LEAD.size - 1)]
+            val tx = (t.x + t.vx * lead).coerceIn(0f, width - 1f)
+            val ty = (t.y + t.vy * lead).coerceIn(top.toFloat(), bottom - 1f)
+            if (isAvoided(tx, ty)) {
+                t.lastSkip = Skip.AVOIDED_SPOT
+                continue
+            }
+            if (best == null || t.hits > bestHits) {
+                best = Target(tx, ty, t.id)
+                bestHits = t.hits
+            }
         }
-        if (best == null) return null
-
-        // If earlier taps missed, the aim was probably off: try further ahead, then behind.
-        val lead = p.leadMs / 1000f * RETRY_LEAD[min(best.taps, RETRY_LEAD.size - 1)]
-        val tx = (best.x + best.vx * lead).coerceIn(0f, width - 1f)
-        val ty = (best.y + best.vy * lead).coerceIn(top.toFloat(), bottom - 1f)
-        return Target(tx, ty, best.id)
+        return best
     }
 
     /** The first rule [t] fails, or null if it may be tapped. */
@@ -457,6 +480,9 @@ class DroneDetector(val width: Int, val height: Int) {
 
         /** Aim-ahead multiplier for the 1st, 2nd, 3rd and later tap on the same drone. */
         private val RETRY_LEAD = floatArrayOf(1f, 1.7f, 0.4f, 0f)
+
+        /** Taps within this distance (screen widths) of an avoided spot are skipped. */
+        private const val AVOID_RADIUS = 0.09f
 
         /** Untapped tracks that moved at least this far (screen widths) count as skipped drones. */
         private const val DRONE_LIKE_TRAVEL = 0.06f

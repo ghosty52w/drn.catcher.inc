@@ -407,4 +407,30 @@ class DroneDetectorTest {
         d.onTapped(hit!!, t)
         assertEquals(1, d.tappedCount)
     }
+
+    @Test
+    fun neverTapsAvoidedSpotsButStillCatchesTheDroneElsewhere() {
+        val d = DroneDetector(w, h)
+        // A building at about x=110..160 where a tap once opened a menu.
+        d.setAvoidSpots(listOf(floatArrayOf(135f / w, 200f / h)))
+        d.process(sky(), 0, params)
+        var x = 10
+        var t = frameMs
+        val taps = ArrayList<DroneDetector.Target>()
+        while (x < w) {
+            val px = sky()
+            square(px, x, 200, 22, rgb(50, 55, 60))
+            d.process(px, t, params)?.let {
+                taps.add(it)
+                d.onTapped(it, t)
+            }
+            x += 4
+            t += frameMs
+        }
+        val r = 0.09f * w
+        assertTrue("never tapped the drone", taps.isNotEmpty())
+        for (tap in taps) {
+            assertTrue("tapped the avoided spot at ${tap.x},${tap.y}", Math.hypot((tap.x - 135.0), (tap.y - 200.0)) >= r)
+        }
+    }
 }

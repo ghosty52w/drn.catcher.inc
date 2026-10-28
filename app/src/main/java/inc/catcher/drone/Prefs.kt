@@ -65,6 +65,25 @@ object Prefs {
 
     fun reset(ctx: Context) = prefs(ctx).edit().clear().apply()
 
+    private const val AVOID_SPOTS = "avoid_spots"
+    private const val MAX_AVOID_SPOTS = 40
+
+    /** Spots never to tap (where a tap once opened a menu), as (x, y) fractions of the screen. */
+    fun avoidSpots(ctx: Context): List<FloatArray> =
+        prefs(ctx).getString(AVOID_SPOTS, "").orEmpty().split(';').mapNotNull { spot ->
+            val parts = spot.split(',')
+            val x = parts.getOrNull(0)?.toFloatOrNull()
+            val y = parts.getOrNull(1)?.toFloatOrNull()
+            if (x != null && y != null) floatArrayOf(x, y) else null
+        }
+
+    fun addAvoidSpot(ctx: Context, x: Float, y: Float) {
+        val spots = (avoidSpots(ctx) + floatArrayOf(x, y)).takeLast(MAX_AVOID_SPOTS)
+        prefs(ctx).edit().putString(AVOID_SPOTS, spots.joinToString(";") { "${it[0]},${it[1]}" }).apply()
+    }
+
+    fun clearAvoidSpots(ctx: Context) = prefs(ctx).edit().remove(AVOID_SPOTS).apply()
+
     fun params(ctx: Context): DroneDetector.Params {
         val top = get(ctx, ROI_TOP)
         val bottom = maxOf(get(ctx, ROI_BOTTOM), top + 5)

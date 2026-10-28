@@ -68,9 +68,12 @@ a drone but wasn't tapped, which rule stopped it (for example "kept changing dir
   Animated buildings and buttons wobble or spin in place, so they don't qualify; areas that animate constantly are learned and ignored.
   Big sudden changes (menus opening) reset the model, and nothing is tapped until the screen
   settles.
-- If a tap opens a menu (the screen changed wholesale and still looks very different most of a
-  second later), it presses Back once to close it. If Back takes you out of Egg, Inc. instead,
-  it brings the game straight back and switches this off.
+- If a tap opens a menu (most of a second later the screen still looks very different from
+  just before the tap), it remembers that spot and never taps there again, and stops tapping
+  until the menu is closed (the floating button shows "⏸ menu"; tap it to carry on anyway).
+  **Forget spots it learned to avoid** clears the list.
+- It can also press Back to close such a menu. If Back takes you out of Egg, Inc. instead, it
+  brings the game straight back and switches this off.
 - A tap that misses is retried up to 4 times, aiming a little further ahead, then behind.
 - `TapService` (accessibility service) taps the predicted position, draws a brief ring there,
   and checks Egg, Inc. is in the foreground.

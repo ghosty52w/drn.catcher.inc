@@ -78,6 +78,10 @@ class MainActivity : Activity() {
         root.addView(heading("Settings"))
         for (s in Prefs.SLIDERS) root.addView(sliderRow(s))
         for (t in Prefs.TOGGLES) root.addView(toggleRow(t))
+        root.addView(button("Forget spots it learned to avoid") {
+            Prefs.clearAvoidSpots(this)
+            toast("Forgot all avoided spots")
+        })
         root.addView(button("Reset to defaults") {
             Prefs.reset(this)
             recreate()
@@ -118,6 +122,11 @@ class MainActivity : Activity() {
                 },
             )
             if (capture != null) append("\n📋 ${capture.report()}")
+            if (capture != null && capture.menuOpen) {
+                append("\n⏸ A tap opened a menu. Close it in Egg, Inc. and catching carries on.")
+            }
+            val avoided = Prefs.avoidSpots(this@MainActivity).size
+            if (avoided > 0) append("\n🚫 Avoiding $avoided spots where a tap opened a menu")
             if (capture != null && capture.menusClosed > 0) {
                 append("\n↩ Closed ${capture.menusClosed} menus opened by mistake")
             }
