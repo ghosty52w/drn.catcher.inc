@@ -37,6 +37,17 @@ class CaptureService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val SETTINGS_REFRESH_MS = 1000L
 
+        /**
+         * A menu opened by our tap is looked for once, this long after the tap: the screen
+         * must still look very different from just before the tap (a passing flash won't).
+         */
+        private const val MENU_CHECK_AFTER_MS = 800L
+        private const val MENU_CHECK_UNTIL_MS = 2000L
+        private const val MENU_DIFFERENCE = 0.35f
+
+        /** The menu counts as closed once the screen is this close to how it looked before the tap. */
+        private const val MENU_CLOSED_DIFFERENCE = 0.2f
+
         /** How long after pressing Back to check we're still in Egg, Inc. */
         private const val BACK_VERIFY_MS = 900L
 
@@ -57,16 +68,19 @@ class CaptureService : Service() {
     var menusClosed = 0
         private set
 
-    private val menus = MenuWatcher()
-
     /** A tap of ours opened a menu that is still open; no taps until it closes. */
-    val menuOpen get() = menus.menuOpen
+    @Volatile
+    var menuOpen = false
+        private set
 
     /** Set when Back took us out of Egg, Inc. instead of closing a menu. */
     @Volatile
     var backLeftGame = false
         private set
 
+    /** When the last tap was actually sent (main thread clock = uptime). */
+    @Volatile
+    private var lastSentTapMs = 0L
 
     private val main = Handler(Looper.getMainLooper())
     private var projection: MediaProjection? = null
@@ -84,8 +98,13 @@ class CaptureService : Service() {
 
     // Only touched on the capture thread.
     private var lastFrameMs = 0L
-    private var lastShotMs = 0L
+    private var lastTapMs = 0L
     private var lastSettingsMs = 0L
+    private var beforeTapSignature: IntArray? = null
+    private var beforeTapMs = 0L
+    private var beforeTapX = 0f
+    private var beforeTapY = 0f
+    private var menuBaseline: IntArray? = null
     private var params = DroneDetector.Params()
     private var frameIntervalMs = 83L
     private var cooldownMs = 450L
@@ -137,8 +156,7 @@ class CaptureService : Service() {
         capW = max(64, screenW / scale)
         capH = max(64, screenH / scale)
         pixels = IntArray(capW * capH)
-        savedLead = Prefs.learnedLead(this)
-        detector = DroneDetector(capW, capH).apply { setLearnedLead(savedLead) }
+        detector = DroneDetector(capW, capH)
         readSettings()
 
         val t = HandlerThread("drone-capture").also { it.start() }
@@ -180,34 +198,13 @@ class CaptureService : Service() {
 
     /** Floating button tap: dismisses the "menu open" wait if there is one, else pauses/resumes. */
     fun togglePause() {
-        if (menus.menuOpen) menus.dismiss() else paused = !paused
+        if (menuOpen) menuOpen = false else paused = !paused
         refreshControls()
     }
 
     fun stopCapture() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-    }
-
-    /** Last learned aim-ahead saved to (or read from) settings. */
-    private var savedLead = Float.NaN
-
-    /** Saves what the detector has learned, or makes it forget if the player cleared it. */
-    private fun syncLearnedLead() {
-        val det = detector ?: return
-        val stored = Prefs.learnedLead(this)
-        if (stored.isNaN() && !savedLead.isNaN()) {
-            det.setLearnedLead(Float.NaN) // "Forget the learned aim ahead" was pressed
-        } else if (!det.learnedLeadMs.isNaN() && det.learnedLeadMs != stored) {
-            Prefs.setLearnedLead(this, det.learnedLeadMs)
-        }
-        savedLead = Prefs.learnedLead(this)
-    }
-
-    /** The aim-ahead in use (ms), and whether it was learned. */
-    fun aimAhead(): Pair<Int, Boolean> {
-        val learned = detector?.learnedLeadMs ?: Float.NaN
-        return if (params.autoLead && !learned.isNaN()) Pair(learned.toInt(), true) else Pair(params.leadMs, false)
     }
 
     fun refreshControls() {
@@ -242,7 +239,6 @@ class CaptureService : Service() {
     }
 
     private fun readSettings() {
-        syncLearnedLead()
         params = Prefs.params(this)
         frameIntervalMs = 1000L / Prefs.get(this, Prefs.FPS)
         cooldownMs = Prefs.get(this, Prefs.COOLDOWN).toLong()
@@ -250,7 +246,6 @@ class CaptureService : Service() {
         showMarks = Prefs.get(this, Prefs.MARKERS)
         autoBack = Prefs.get(this, Prefs.AUTO_BACK)
         detector?.setAvoidSpots(Prefs.avoidSpots(this))
-        detector?.setNoTapAreas(if (Prefs.get(this, Prefs.AVOID_BUTTONS)) DroneDetector.EGG_INC_SIDE_BUTTONS else emptyList())
     }
 
     private fun onImage(r: ImageReader) {
@@ -273,11 +268,6 @@ class CaptureService : Service() {
                 return
             }
             if (image.width != capW || image.height != capH) return
-            // When the screen was captured. Processing starts a varying while later, and
-            // timing motion by that would make drones seem to jump about.
-            val shotMs = (image.timestamp / 1_000_000).takeIf { it in (now - 1000)..now } ?: now
-            if (shotMs <= lastShotMs) return
-            lastShotMs = shotMs
 
             val plane = image.planes[0]
             val buf = plane.buffer
@@ -300,11 +290,15 @@ class CaptureService : Service() {
                 }
             }
 
-            val target = det.process(px, shotMs, params, excludedRect())
-            watchForMenu(det, det.signature(px, params), now)
-            if (menus.menuOpen || target == null || !det.readyToTap(target, shotMs, cooldownMs)) return
-            det.onTapped(target, shotMs)
-            menus.onTapDecided(det.signature(px, params), target.x, target.y, now)
+            val target = det.process(px, now, params, excludedRect())
+            watchForMenu(det, px, now)
+            if (menuOpen || target == null || now - lastTapMs < cooldownMs) return
+            lastTapMs = now
+            det.onTapped(target, now)
+            beforeTapSignature = det.signature(px, params)
+            beforeTapMs = now
+            beforeTapX = target.x
+            beforeTapY = target.y
 
             val sx = target.x * screenW / capW
             val sy = target.y * screenH / capH
@@ -315,7 +309,7 @@ class CaptureService : Service() {
                 if (paused || instance == null) return@post
                 if (requireEgg && !svc.isEggIncForeground()) return@post
                 if (svc.tap(sx, sy)) {
-                    menus.onTapSent(SystemClock.uptimeMillis())
+                    lastSentTapMs = SystemClock.uptimeMillis()
                     taps++
                     if (mark) svc.mark(sx, sy)
                     refreshControls()
@@ -327,22 +321,41 @@ class CaptureService : Service() {
     }
 
     /**
-     * When a tap of ours opened a menu, remember that spot so it's never tapped again, and
-     * (if allowed) press Back to close the menu. No taps are sent while it stays open.
+     * Notices when one of our taps hit a building or button and opened a menu: most of a
+     * second later, the screen still looks very different from just before the tap. The spot is then remembered and never tapped again,
+     * tapping stops until the screen looks like it did before the tap (the menu was
+     * closed), and, if allowed, Back is pressed to close it.
      */
-    private fun watchForMenu(det: DroneDetector, signature: IntArray, now: Long) {
-        when (val event = menus.onFrame(signature, now)) {
-            null -> return
-            MenuWatcher.Event.Closed -> {
+    private fun watchForMenu(det: DroneDetector, px: IntArray, now: Long) {
+        val baseline = menuBaseline
+        if (baseline != null) {
+            // Cleared from the floating button: the player says carry on.
+            if (!menuOpen) {
+                menuBaseline = null
+            } else if (DroneDetector.signatureDifference(baseline, det.signature(px, params)) < MENU_CLOSED_DIFFERENCE) {
+                menuOpen = false
+                menuBaseline = null
                 refreshControls()
-                return
             }
-            is MenuWatcher.Event.Opened -> {
-                Prefs.addAvoidSpot(this, event.x / capW, event.y / capH)
-                det.setAvoidSpots(Prefs.avoidSpots(this))
-                refreshControls()
-            }
+            return
         }
+        val before = beforeTapSignature ?: return
+        val sentAt = lastSentTapMs
+        if (sentAt < beforeTapMs) {
+            // That tap was never sent (e.g. Egg, Inc. wasn't on screen).
+            if (now - beforeTapMs > MENU_CHECK_UNTIL_MS) beforeTapSignature = null
+            return
+        }
+        if (now - sentAt < MENU_CHECK_AFTER_MS) return
+        beforeTapSignature = null
+        if (now - sentAt > MENU_CHECK_UNTIL_MS) return
+        if (DroneDetector.signatureDifference(before, det.signature(px, params)) < MENU_DIFFERENCE) return
+
+        Prefs.addAvoidSpot(this, beforeTapX / capW, beforeTapY / capH)
+        det.setAvoidSpots(Prefs.avoidSpots(this))
+        menuBaseline = before
+        menuOpen = true
+        refreshControls()
         if (!autoBack) {
             main.post {
                 Toast.makeText(

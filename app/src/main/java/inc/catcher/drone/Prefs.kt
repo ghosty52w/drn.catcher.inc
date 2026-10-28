@@ -35,8 +35,8 @@ object Prefs {
         "How far something must fly before it's tapped. Raise if it taps animations.")
     val MIN_SPEED = Slider("min_speed", "Slowest drone", 0, 50, 4, "% of width/s",
         "Things slower than this (clouds, counters) are ignored.")
-    val LEAD = Slider("lead_ms", "Aim ahead", 0, 400, 120, "ms",
-        "Where it starts. With learning on, it adjusts itself to your phone as it catches fast drones.")
+    val LEAD = Slider("lead_ms", "Aim ahead", 0, 400, 100, "ms",
+        "Raise if taps land behind drones, lower if they land in front.")
     val COOLDOWN = Slider("cooldown_ms", "Pause between taps", 100, 3000, 450, "ms", "")
     val FPS = Slider("fps", "Checks per second", 2, 30, 12, "/s",
         "Higher reacts faster but uses more battery.")
@@ -50,10 +50,8 @@ object Prefs {
     val MARKERS = Toggle("markers", "Show a ring where it taps", true)
     val EDGE_ENTRY = Toggle("edge_entry", "Only tap things that fly in from the side", true)
     val AUTO_BACK = Toggle("auto_back", "Press Back if a tap opens a menu", true)
-    val AUTO_LEAD = Toggle("auto_lead", "Learn the aim ahead by itself", true)
-    val AVOID_BUTTONS = Toggle("avoid_buttons", "Never tap near the contract eggs and event pills at the sides", true)
 
-    val TOGGLES = listOf(ONLY_EGG, AVOID_BUTTONS, AUTO_LEAD, EDGE_ENTRY, AUTO_BACK, LAUNCH_EGG, MARKERS)
+    val TOGGLES = listOf(ONLY_EGG, EDGE_ENTRY, AUTO_BACK, LAUNCH_EGG, MARKERS)
 
     fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -66,15 +64,6 @@ object Prefs {
     fun set(ctx: Context, t: Toggle, value: Boolean) = prefs(ctx).edit().putBoolean(t.key, value).apply()
 
     fun reset(ctx: Context) = prefs(ctx).edit().clear().apply()
-
-    private const val LEARNED_LEAD = "learned_lead_ms"
-
-    /** The aim-ahead learned on this phone (ms), or NaN. */
-    fun learnedLead(ctx: Context): Float = prefs(ctx).getFloat(LEARNED_LEAD, Float.NaN)
-
-    fun setLearnedLead(ctx: Context, ms: Float) = prefs(ctx).edit().putFloat(LEARNED_LEAD, ms).apply()
-
-    fun clearLearnedLead(ctx: Context) = prefs(ctx).edit().remove(LEARNED_LEAD).apply()
 
     private const val AVOID_SPOTS = "avoid_spots"
     private const val MAX_AVOID_SPOTS = 40
@@ -110,7 +99,6 @@ object Prefs {
             minTravel = get(ctx, MIN_TRAVEL) / 100f,
             requireEdgeEntry = get(ctx, EDGE_ENTRY),
             leadMs = get(ctx, LEAD),
-            autoLead = get(ctx, AUTO_LEAD),
         )
     }
 }
