@@ -62,7 +62,7 @@ class DroneDetector(val width: Int, val height: Int) {
          */
         val minAlignment: Float = 0.92f,
         /** Give up on something after tapping it this many times without it disappearing. */
-        val maxTapsPerTrack: Int = 3,
+        val maxTapsPerTrack: Int = 4,
         /** How far ahead (in ms) to aim along the drone's path. */
         val leadMs: Int = 100,
     )
@@ -70,13 +70,34 @@ class DroneDetector(val width: Int, val height: Int) {
     /** A tap point in capture coordinates. */
     data class Target(val x: Float, val y: Float, val trackId: Int)
 
+    /** Why something that looked like a drone was never tapped. */
+    enum class Skip(val label: String) {
+        SPEED("moving too slow or too fast"),
+        SHORT_FLIGHT("didn't fly far enough"),
+        NOT_FROM_SIDE("didn't come in from the side"),
+        WOBBLY("path too wobbly"),
+        TOO_VERTICAL("flying too steeply up or down"),
+        TURNING("kept changing direction"),
+        GAVE_UP("still there after every retry"),
+    }
+
     private class Blob(val cx: Float, val cy: Float, val size: Float)
+
+    private class Sample(val x: Float, val y: Float, val ms: Long)
 
     private class Track(val id: Int, var x: Float, var y: Float, var size: Float, var lastMs: Long) {
         val originX = x
         val originY = y
-        var pathLength = 0f
+        /**
+         * Positions sampled every [SAMPLE_MS], oldest first. Measuring the path between
+         * samples rather than between frames keeps a drone's up-and-down bobbing from
+         * looking like wobble or turning.
+         */
+        val samples = ArrayList<Sample>().apply { add(Sample(x, y, lastMs)) }
+        var lastSampleMs = lastMs
+        var sampledPath = 0f
         var taps = 0
+        var lastSkip: Skip? = null
         var vx = 0f
         var vy = 0f
         var hits = 1
@@ -98,6 +119,13 @@ class DroneDetector(val width: Int, val height: Int) {
     private var nextId = 1
 
     private var warmUntilMs = Long.MIN_VALUE
+    private val skipCounts = IntArray(Skip.entries.size)
+
+    /** Things that flew like a drone and were tapped, and that were never tapped, by reason. */
+    var tappedCount = 0
+        private set
+
+    fun skipCount(reason: Skip): Int = skipCounts[reason.ordinal]
 
     /** When the last whole-scene change was seen, e.g. a menu opening. */
     var lastSceneChangeMs = Long.MIN_VALUE
@@ -117,7 +145,10 @@ class DroneDetector(val width: Int, val height: Int) {
      */
     fun onTapped(target: Target, nowMs: Long, radiusFrac: Float = 0.12f, durationMs: Long = 900L) {
         zones.add(Zone(target.x, target.y, width * radiusFrac, nowMs + durationMs))
-        tracks.find { it.id == target.trackId }?.let { it.taps++ }
+        tracks.find { it.id == target.trackId }?.let {
+            if (it.taps == 0) tappedCount++
+            it.taps++
+        }
     }
 
     /**
@@ -154,31 +185,49 @@ class DroneDetector(val width: Int, val height: Int) {
         val vEdge = EDGE_MARGIN_VERTICAL * width
         var best: Track? = null
         for (t in tracks) {
-            if (t.lastMs != nowMs || t.hits < p.confirmHits || t.taps >= p.maxTapsPerTrack) continue
-            val speed = hypot(t.vx, t.vy) / width
-            if (speed < p.minSpeed || speed > p.maxSpeed) continue
-            val dx = t.x - t.originX
-            val dy = t.y - t.originY
-            val travel = hypot(dx, dy)
-            if (travel < p.minTravel * width) continue
-            val enteredFromEdge = t.originX <= edge || t.originX >= width - 1 - edge ||
-                t.originY <= top + vEdge || t.originY >= bottom - 1 - vEdge
-            if (p.requireEdgeEntry && !enteredFromEdge) {
-                val headingAwayFromNearSide = if (t.originX < width / 2f) dx > 0 else dx < 0
-                if (!headingAwayFromNearSide || travel < p.lateEntryTravel * width) continue
-            }
-            if (travel < p.minStraightness * t.pathLength) continue
-            if (abs(dy) > p.maxVerticalShare * travel) continue
-            if ((t.vx * dx + t.vy * dy) / (speed * width * travel) < p.minAlignment) continue
+            if (t.lastMs != nowMs || t.hits < p.confirmHits) continue
+            t.lastSkip = skipReason(t, p, top, bottom, edge, vEdge)
+            if (t.lastSkip != null) continue
             if (zones.any { hypot(t.x - it.x, t.y - it.y) < it.r }) continue
             if (best == null || t.hits > best.hits) best = t
         }
         if (best == null) return null
 
-        val lead = p.leadMs / 1000f
+        // If earlier taps missed, the aim was probably off: try further ahead, then behind.
+        val lead = p.leadMs / 1000f * RETRY_LEAD[min(best.taps, RETRY_LEAD.size - 1)]
         val tx = (best.x + best.vx * lead).coerceIn(0f, width - 1f)
         val ty = (best.y + best.vy * lead).coerceIn(top.toFloat(), bottom - 1f)
         return Target(tx, ty, best.id)
+    }
+
+    /** The first rule [t] fails, or null if it may be tapped. */
+    private fun skipReason(t: Track, p: Params, top: Int, bottom: Int, edge: Float, vEdge: Float): Skip? {
+        if (t.taps >= p.maxTapsPerTrack) return Skip.GAVE_UP
+        val speed = hypot(t.vx, t.vy) / width
+        if (speed < p.minSpeed || speed > p.maxSpeed) return Skip.SPEED
+        val dx = t.x - t.originX
+        val dy = t.y - t.originY
+        val travel = hypot(dx, dy)
+        if (travel < p.minTravel * width) return Skip.SHORT_FLIGHT
+        val enteredFromEdge = t.originX <= edge || t.originX >= width - 1 - edge ||
+            t.originY <= top + vEdge || t.originY >= bottom - 1 - vEdge
+        if (p.requireEdgeEntry && !enteredFromEdge) {
+            val headingAwayFromNearSide = if (t.originX < width / 2f) dx > 0 else dx < 0
+            if (!headingAwayFromNearSide) return Skip.NOT_FROM_SIDE
+            if (travel < p.lateEntryTravel * width) return Skip.SHORT_FLIGHT
+        }
+        val last = t.samples[t.samples.size - 1]
+        val path = t.sampledPath + hypot(t.x - last.x, t.y - last.y)
+        if (travel < p.minStraightness * path) return Skip.WOBBLY
+        if (abs(dy) > p.maxVerticalShare * travel) return Skip.TOO_VERTICAL
+        // Recent heading: from the newest sample at least HEADING_WINDOW_MS old.
+        var ref = t.samples[0]
+        for (sample in t.samples) if (t.lastMs - sample.ms >= HEADING_WINDOW_MS) ref = sample
+        val rx = t.x - ref.x
+        val ry = t.y - ref.y
+        val recent = hypot(rx, ry)
+        if (recent > 0f && (rx * dx + ry * dy) / (recent * travel) < p.minAlignment) return Skip.TURNING
+        return null
     }
 
     /**
@@ -332,15 +381,30 @@ class DroneDetector(val width: Int, val height: Int) {
                 best.vx = best.vx * 0.4f + nvx * 0.6f
                 best.vy = best.vy * 0.4f + nvy * 0.6f
             }
-            best.pathLength += hypot(b.cx - best.x, b.cy - best.y)
             best.x = b.cx
             best.y = b.cy
+            if (nowMs - best.lastSampleMs >= SAMPLE_MS) {
+                val prev = best.samples[best.samples.size - 1]
+                best.sampledPath += hypot(b.cx - prev.x, b.cy - prev.y)
+                best.samples.add(Sample(b.cx, b.cy, nowMs))
+                if (best.samples.size > MAX_SAMPLES) best.samples.removeAt(0)
+                best.lastSampleMs = nowMs
+            }
             best.size = b.size
             best.lastMs = nowMs
             best.hits++
             best.matched = true
         }
-        tracks.removeAll { nowMs - it.lastMs > TRACK_TIMEOUT_MS }
+        tracks.removeAll { t ->
+            val gone = nowMs - t.lastMs > TRACK_TIMEOUT_MS
+            val skip = t.lastSkip
+            if (gone && t.taps == 0 && skip != null && hypot(t.x - t.originX, t.y - t.originY) >= DRONE_LIKE_TRAVEL * width) {
+                skipCounts[skip.ordinal]++
+            } else if (gone && skip == Skip.GAVE_UP) {
+                skipCounts[skip.ordinal]++
+            }
+            gone
+        }
     }
 
     companion object {
@@ -383,5 +447,18 @@ class DroneDetector(val width: Int, val height: Int) {
 
         /** A track survives this long without being seen, e.g. while crossing a busy area. */
         private const val TRACK_TIMEOUT_MS = 600L
+
+        /** Track positions are sampled this often for the wobble and turning checks. */
+        private const val SAMPLE_MS = 300L
+        private const val MAX_SAMPLES = 8
+
+        /** The recent heading is measured over at least this long. */
+        private const val HEADING_WINDOW_MS = 500L
+
+        /** Aim-ahead multiplier for the 1st, 2nd, 3rd and later tap on the same drone. */
+        private val RETRY_LEAD = floatArrayOf(1f, 1.7f, 0.4f, 0f)
+
+        /** Untapped tracks that moved at least this far (screen widths) count as skipped drones. */
+        private const val DRONE_LIKE_TRAVEL = 0.06f
     }
 }

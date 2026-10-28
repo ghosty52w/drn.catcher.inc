@@ -41,9 +41,16 @@ Tap **Preview search area in Egg, Inc.** to see the blue box where it looks for 
 cover the sky but not the money counter at the top, or the chickens, trucks and buttons at the
 bottom. Adjust **Search area top / bottom** until it does.
 
+While it runs, the main screen shows how many drones it tapped and, for anything that flew like
+a drone but wasn't tapped, which rule stopped it (for example "kept changing direction" or
+"didn't come in from the side"). Use that to pick what to change below.
+
 | Problem | Try |
 | --- | --- |
-| Misses drones | Lower **Motion threshold** or **Smallest drone** |
+| Misses drones, nothing listed as skipped | It isn't seeing them: check the search area covers where they fly, then lower **Motion threshold** or **Smallest drone** |
+| Skipped: "didn't fly far enough" | Lower **Shortest flight** |
+| Skipped: "didn't come in from the side" | Turn off **Only tap things that fly in from the side** |
+| Skipped: "still there after every retry" | The taps are missing: adjust **Aim ahead** |
 | Taps land behind drones | Raise **Aim ahead** |
 | Taps land in front of drones | Lower **Aim ahead** |
 | Taps things that aren't drones | Raise **Shortest flight**, **Motion threshold** or **Smallest drone**, or shrink the search area |
@@ -57,12 +64,14 @@ bottom. Adjust **Search area top / bottom** until it does.
   that changed, groups them into blobs, and follows blobs across frames. A blob is only tapped
   once it has flown in from the side, travelled a real distance in a fairly straight, mostly
   sideways line, and is drone-sized and drone-fast. A drone that was hidden behind the game's
-  side buttons and first shows up part-way in is still caught once it has flown a bit further. Animated buildings and buttons wobble or
-  spin in place, so they don't qualify; areas that animate constantly are learned and ignored.
+  side buttons and first shows up part-way in is still caught once it has flown a bit further.
+  Animated buildings and buttons wobble or spin in place, so they don't qualify; areas that animate constantly are learned and ignored.
   Big sudden changes (menus opening) reset the model, and nothing is tapped until the screen
   settles.
-- If the screen changes completely right after a tap, that tap probably opened a menu, so it
-  presses Back once to close it (can be switched off).
+- If a tap opens a menu (the screen changed wholesale and still looks very different most of a
+  second later), it presses Back once to close it. If Back takes you out of Egg, Inc. instead,
+  it brings the game straight back and switches this off.
+- A tap that misses is retried up to 4 times, aiming a little further ahead, then behind.
 - `TapService` (accessibility service) taps the predicted position, draws a brief ring there,
   and checks Egg, Inc. is in the foreground.
 

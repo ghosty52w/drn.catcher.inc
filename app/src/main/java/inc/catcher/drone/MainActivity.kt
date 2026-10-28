@@ -117,6 +117,7 @@ class MainActivity : Activity() {
                     else -> "🛸 Catching · ${capture.taps} taps"
                 },
             )
+            if (capture != null) append("\n📋 ${capture.report()}")
             if (capture != null && capture.menusClosed > 0) {
                 append("\n↩ Closed ${capture.menusClosed} menus opened by mistake")
             }

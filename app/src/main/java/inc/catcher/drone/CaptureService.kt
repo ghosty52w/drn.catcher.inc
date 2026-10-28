@@ -172,6 +172,19 @@ class CaptureService : Service() {
         return virtualDisplay != null
     }
 
+    /**
+     * What happened to things that flew like drones this session, e.g.
+     * "12 tapped · skipped: 3 kept changing direction, 1 didn't come in from the side".
+     */
+    fun report(): String {
+        val det = detector ?: return ""
+        val skipped = DroneDetector.Skip.entries
+            .map { it to det.skipCount(it) }
+            .filter { it.second > 0 }
+            .joinToString(", ") { "${it.second} ${it.first.label}" }
+        return "${det.tappedCount} drones tapped" + if (skipped.isEmpty()) "" else " · skipped: $skipped"
+    }
+
     fun togglePause() {
         paused = !paused
         refreshControls()

@@ -349,4 +349,62 @@ class DroneDetectorTest {
         val big = DroneDetector.signatureDifference(d.signature(farm, params), d.signature(menu, params))
         assertTrue("open menu scored $big", big > 0.6f)
     }
+
+    @Test
+    fun catchesDronesThatBobUpAndDown() {
+        // Drones that bob as they fly, at different heights, speeds and bob rates.
+        var missed = ArrayList<String>()
+        for (amp in listOf(4, 8, 12)) for (period in listOf(6, 10, 16)) for (step in listOf(4, 7, 11)) {
+            val d = DroneDetector(w, h)
+            d.process(sky(), 0, params)
+            var x = 0
+            var i = 0
+            var hit: DroneDetector.Target? = null
+            while (hit == null && x < w) {
+                val px = sky()
+                val y = 230 + (amp * Math.sin(i * 2 * Math.PI / period)).toInt()
+                square(px, x, y, 22, rgb(50, 55, 60))
+                hit = d.process(px, (i + 1) * frameMs, params)
+                x += step
+                i++
+            }
+            if (hit == null || x > w * 0.75) missed.add("amp=$amp period=$period step=$step caughtAt=${if (hit == null) "never" else "x=$x"}")
+        }
+        assertTrue("missed bobbing drones: $missed", missed.isEmpty())
+    }
+
+    @Test
+    fun countsWhyDroneLikeThingsWereSkipped() {
+        val d = DroneDetector(w, h)
+        d.process(sky(), 0, params)
+        var t = frameMs
+        // Appears mid-screen and flies toward its nearest side, then leaves.
+        var x = 120
+        repeat(18) {
+            val px = sky()
+            square(px, x, 250, 22, rgb(50, 55, 60))
+            d.process(px, t, params)
+            x -= 5
+            t += frameMs
+        }
+        repeat(10) {
+            d.process(sky(), t, params)
+            t += frameMs
+        }
+        assertEquals(1, d.skipCount(DroneDetector.Skip.NOT_FROM_SIDE))
+        assertEquals(0, d.tappedCount)
+
+        // A normal drone gets tapped and counted as such.
+        x = 10
+        var hit: DroneDetector.Target? = null
+        while (hit == null && x < w) {
+            val px = sky()
+            square(px, x, 200, 22, rgb(50, 55, 60))
+            hit = d.process(px, t, params)
+            x += 6
+            t += frameMs
+        }
+        d.onTapped(hit!!, t)
+        assertEquals(1, d.tappedCount)
+    }
 }
