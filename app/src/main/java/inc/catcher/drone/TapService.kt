@@ -109,6 +109,18 @@ class TapService : AccessibilityService() {
 
     fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
 
+    /** Brings Egg, Inc. back to the front (resuming it if it's still running). */
+    fun bringEggIncToFront(): Boolean {
+        val intent = packageManager.getLaunchIntentForPackage(Prefs.EGG_INC) ?: return false
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        return try {
+            startActivity(intent)
+            true
+        } catch (e: RuntimeException) {
+            false
+        }
+    }
+
     fun mark(x: Float, y: Float) = ensureMarkers()?.addMark(x, y)
 
     /** Highlights the search area for a few seconds. Fractions of the screen height. */

@@ -328,4 +328,25 @@ class DroneDetectorTest {
             }
         }
     }
+
+    @Test
+    fun signatureSeesAnOpenMenuButNotSmallChanges() {
+        val d = DroneDetector(w, h)
+        val farm = sky()
+        square(farm, 200, 300, 60, rgb(180, 120, 80)) // a building
+
+        // The same farm with a drone, a small explosion and a building animation frame.
+        val busyFarm = farm.copyOf()
+        square(busyFarm, 60, 200, 22, rgb(50, 55, 60))
+        square(busyFarm, 130, 250, 30, rgb(255, 230, 120))
+        square(busyFarm, 200, 300, 40, rgb(220, 140, 90))
+        val small = DroneDetector.signatureDifference(d.signature(farm, params), d.signature(busyFarm, params))
+        assertTrue("small changes scored $small", small < 0.1f)
+
+        // A menu panel covering most of the screen.
+        val menu = farm.copyOf()
+        for (y in 120 until 560) for (x in 15 until 255) menu[y * w + x] = rgb(245, 245, 240)
+        val big = DroneDetector.signatureDifference(d.signature(farm, params), d.signature(menu, params))
+        assertTrue("open menu scored $big", big > 0.6f)
+    }
 }

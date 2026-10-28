@@ -181,6 +181,24 @@ class DroneDetector(val width: Int, val height: Int) {
         return Target(tx, ty, best.id)
     }
 
+    /**
+     * A coarse brightness sample of the search area, used to tell whether a menu is still
+     * covering the screen some time after a tap. Compare two with [signatureDifference].
+     */
+    fun signature(px: IntArray, p: Params): IntArray {
+        val top = (p.roiTop * height).toInt().coerceIn(0, height - 1)
+        val bottom = (p.roiBottom * height).toInt().coerceIn(top + 1, height)
+        val out = IntArray(((bottom - top + SIGNATURE_STEP - 1) / SIGNATURE_STEP) * ((width + SIGNATURE_STEP - 1) / SIGNATURE_STEP))
+        var k = 0
+        for (y in top until bottom step SIGNATURE_STEP) {
+            for (x in 0 until width step SIGNATURE_STEP) {
+                val c = px[y * width + x]
+                out[k++] = (((c shr 16) and 0xff) * 77 + ((c shr 8) and 0xff) * 150 + (c and 0xff) * 29) shr 8
+            }
+        }
+        return out
+    }
+
     private fun seed(px: IntArray, top: Int, bottom: Int) {
         for (i in top * width until bottom * width) {
             val c = px[i]
@@ -325,34 +343,45 @@ class DroneDetector(val width: Int, val height: Int) {
         tracks.removeAll { nowMs - it.lastMs > TRACK_TIMEOUT_MS }
     }
 
-    private companion object {
-        const val STILL: Byte = 0
-        const val MOVING: Byte = 1
-        const val VISITED: Byte = 2
+    companion object {
+        /** Share of sample points (0-1) whose brightness differs clearly between two signatures. */
+        fun signatureDifference(a: IntArray, b: IntArray): Float {
+            if (a.size != b.size || a.isEmpty()) return 1f
+            var changed = 0
+            for (i in a.indices) if (abs(a[i] - b[i]) > SIGNATURE_THRESHOLD) changed++
+            return changed.toFloat() / a.size
+        }
+
+        private const val SIGNATURE_STEP = 4
+        private const val SIGNATURE_THRESHOLD = 40
+
+        private const val STILL: Byte = 0
+        private const val MOVING: Byte = 1
+        private const val VISITED: Byte = 2
 
         /** How fast still pixels and moving pixels blend into the background. */
-        const val BG_ALPHA = 0.10f
-        const val FG_ALPHA = 0.02f
+        private const val BG_ALPHA = 0.10f
+        private const val FG_ALPHA = 0.02f
 
         /** More than this fraction of the region moving at once means the scene changed. */
-        const val SCENE_CHANGE_FRACTION = 0.20f
+        private const val SCENE_CHANGE_FRACTION = 0.20f
 
         /**
          * Pixels that were moving in more than this share of recent frames (roughly the
          * last 10 s) are looping animations, not drones, and are ignored.
          */
-        const val ACTIVITY_ALPHA = 0.01f
-        const val BUSY_ACTIVITY = 0.12f
+        private const val ACTIVITY_ALPHA = 0.01f
+        private const val BUSY_ACTIVITY = 0.12f
 
         /** Moving pixels up to this far apart belong to the same blob. */
-        const val GAP = 2
-        const val MIN_FILL = 0.10f
-        const val MAX_ASPECT = 4
+        private const val GAP = 2
+        private const val MIN_FILL = 0.10f
+        private const val MAX_ASPECT = 4
 
         /** How close to the region's top/bottom (in screen widths) counts as entering from it. */
-        const val EDGE_MARGIN_VERTICAL = 0.06f
+        private const val EDGE_MARGIN_VERTICAL = 0.06f
 
         /** A track survives this long without being seen, e.g. while crossing a busy area. */
-        const val TRACK_TIMEOUT_MS = 600L
+        private const val TRACK_TIMEOUT_MS = 600L
     }
 }

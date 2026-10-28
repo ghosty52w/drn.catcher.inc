@@ -20,6 +20,7 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.widget.Toast
 import kotlin.math.max
 
 /**
@@ -36,8 +37,16 @@ class CaptureService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val SETTINGS_REFRESH_MS = 1000L
 
-        /** A whole-screen change this soon after our tap means the tap opened a menu. */
-        private const val MENU_WINDOW_MS = 1500L
+        /**
+         * A menu opened by our tap is looked for once, this long after the tap: the screen
+         * must still look very different from just before the tap (a passing flash won't).
+         */
+        private const val MENU_CHECK_AFTER_MS = 800L
+        private const val MENU_CHECK_UNTIL_MS = 2000L
+        private const val MENU_DIFFERENCE = 0.35f
+
+        /** How long after pressing Back to check we're still in Egg, Inc. */
+        private const val BACK_VERIFY_MS = 900L
 
         @Volatile
         var instance: CaptureService? = null
@@ -54,6 +63,11 @@ class CaptureService : Service() {
 
     @Volatile
     var menusClosed = 0
+        private set
+
+    /** Set when Back took us out of Egg, Inc. instead of closing a menu. */
+    @Volatile
+    var backLeftGame = false
         private set
 
     /** When the last tap was actually sent (main thread clock = uptime). */
@@ -78,12 +92,14 @@ class CaptureService : Service() {
     private var lastFrameMs = 0L
     private var lastTapMs = 0L
     private var lastSettingsMs = 0L
-    private var lastTapClosedMs = 0L
+    private var beforeTapSignature: IntArray? = null
+    private var beforeTapMs = 0L
     private var params = DroneDetector.Params()
     private var frameIntervalMs = 83L
     private var cooldownMs = 450L
     private var onlyEgg = true
     private var showMarks = true
+    @Volatile
     private var autoBack = true
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -245,10 +261,12 @@ class CaptureService : Service() {
             }
 
             val target = det.process(px, now, params, excludedRect())
-            closeMenuIfWeOpenedOne(det)
+            closeMenuIfWeOpenedOne(det, px, now)
             if (target == null || now - lastTapMs < cooldownMs) return
             lastTapMs = now
             det.onTapped(target, now)
+            beforeTapSignature = det.signature(px, params)
+            beforeTapMs = now
 
             val sx = target.x * screenW / capW
             val sy = target.y * screenH / capH
@@ -271,24 +289,45 @@ class CaptureService : Service() {
     }
 
     /**
-     * If the whole screen changed right after one of our taps, the tap probably hit a
-     * building or button and opened a menu: press Back once to close it.
+     * If one of our taps hit a building or button and opened a menu, press Back once to
+     * close it. A menu is assumed only if the screen changed wholesale after the tap and,
+     * most of a second later, still looks very different from just before the tap.
      */
-    private fun closeMenuIfWeOpenedOne(det: DroneDetector) {
-        val tapAt = lastSentTapMs
-        val changedAt = det.lastSceneChangeMs
-        if (!autoBack || tapAt == 0L || tapAt == lastTapClosedMs) return
-        if (changedAt <= tapAt || changedAt - tapAt > MENU_WINDOW_MS) return
-        lastTapClosedMs = tapAt
-        val requireEgg = onlyEgg
+    private fun closeMenuIfWeOpenedOne(det: DroneDetector, px: IntArray, now: Long) {
+        val before = beforeTapSignature ?: return
+        val sentAt = lastSentTapMs
+        if (sentAt < beforeTapMs) {
+            // That tap was never sent (e.g. Egg, Inc. wasn't on screen).
+            if (now - beforeTapMs > MENU_CHECK_UNTIL_MS) beforeTapSignature = null
+            return
+        }
+        if (now - sentAt < MENU_CHECK_AFTER_MS) return
+        beforeTapSignature = null
+        if (!autoBack || now - sentAt > MENU_CHECK_UNTIL_MS) return
+        if (det.lastSceneChangeMs < sentAt) return
+        if (DroneDetector.signatureDifference(before, det.signature(px, params)) < MENU_DIFFERENCE) return
         main.post {
             val svc = TapService.instance ?: return@post
-            if (requireEgg && !svc.isEggIncForeground()) return@post
-            if (svc.pressBack()) {
-                menusClosed++
-                refreshControls()
-            }
+            if (!svc.isEggIncForeground() || !svc.pressBack()) return@post
+            menusClosed++
+            refreshControls()
+            main.postDelayed({ returnToGameIfBackLeftIt() }, BACK_VERIFY_MS)
         }
+    }
+
+    /** Back exited Egg, Inc. instead of closing a menu: bring the game back and stop using Back. */
+    private fun returnToGameIfBackLeftIt() {
+        val svc = TapService.instance ?: return
+        if (instance == null || svc.isEggIncForeground()) return
+        svc.bringEggIncToFront()
+        autoBack = false
+        backLeftGame = true
+        Prefs.set(this, Prefs.AUTO_BACK, false)
+        Toast.makeText(
+            this,
+            "Back left Egg, Inc. instead of closing a menu, so \"Press Back if a tap opens a menu\" is now off",
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     /** Our floating button, mapped into capture coordinates, so its updates aren't seen as motion. */

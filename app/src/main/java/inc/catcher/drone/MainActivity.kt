@@ -38,6 +38,7 @@ class MainActivity : Activity() {
     }
 
     private lateinit var statusView: TextView
+    private val switches = ArrayList<Pair<Switch, Prefs.Toggle>>()
     private val ui = Handler(Looper.getMainLooper())
     private val refresher = object : Runnable {
         override fun run() {
@@ -94,6 +95,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // The service can change a setting itself (e.g. switching auto-close off).
+        for ((view, t) in switches) view.isChecked = Prefs.get(this, t)
         ui.post(refresher)
     }
 
@@ -116,6 +119,9 @@ class MainActivity : Activity() {
             )
             if (capture != null && capture.menusClosed > 0) {
                 append("\n↩ Closed ${capture.menusClosed} menus opened by mistake")
+            }
+            if (capture != null && capture.backLeftGame) {
+                append("\n⚠ Back left Egg, Inc. instead of closing a menu, so \"Press Back if a tap opens a menu\" was switched off")
             }
             if (eggIncLaunchIntent() == null) append("\n⚠ Egg, Inc. isn't installed on this device")
         }
@@ -209,7 +215,7 @@ class MainActivity : Activity() {
         return box
     }
 
-    private fun toggleRow(t: Prefs.Toggle): View = Switch(this).apply {
+    private fun toggleRow(t: Prefs.Toggle): View = Switch(this).also { switches.add(it to t) }.apply {
         text = t.label
         textSize = 15f
         isChecked = Prefs.get(this@MainActivity, t)
