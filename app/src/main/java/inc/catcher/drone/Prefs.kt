@@ -50,8 +50,9 @@ object Prefs {
     val MARKERS = Toggle("markers", "Show a ring where it taps", true)
     val EDGE_ENTRY = Toggle("edge_entry", "Only tap things that fly in from the side", true)
     val AUTO_BACK = Toggle("auto_back", "Press Back if a tap opens a menu", true)
+    val AVOID_BUTTONS = Toggle("avoid_buttons", "Never tap near the contract eggs and event pills at the sides", true)
 
-    val TOGGLES = listOf(ONLY_EGG, EDGE_ENTRY, AUTO_BACK, LAUNCH_EGG, MARKERS)
+    val TOGGLES = listOf(ONLY_EGG, AVOID_BUTTONS, EDGE_ENTRY, AUTO_BACK, LAUNCH_EGG, MARKERS)
 
     fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 

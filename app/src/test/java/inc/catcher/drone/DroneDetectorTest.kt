@@ -260,16 +260,34 @@ class DroneDetectorTest {
     }
 
     @Test
-    fun ignoresMidScreenThingsHeadingToTheirNearSide() {
+    fun ignoresShortMidScreenMovesTowardTheirNearSide() {
         val d = DroneDetector(w, h)
         d.process(sky(), 0, params)
         var x = 120
-        repeat(18) { i ->
+        repeat(30) { i ->
             val px = sky()
             square(px, x, 250, 22, rgb(50, 55, 60))
             assertNull(d.process(px, (i + 1) * frameMs, params))
-            x -= 5
+            if (i < 12) x -= 5 // 60 px, then stops: a panel sliding, a vehicle parking
         }
+    }
+
+    @Test
+    fun catchesALostDroneFoundAgainPastTheMiddle() {
+        val d = DroneDetector(w, h)
+        d.process(sky(), 0, params)
+        // First seen mid-screen, heading left: e.g. it blended into a building until now.
+        var x = 180
+        var t = frameMs
+        var hit: DroneDetector.Target? = null
+        while (hit == null && x > 0) {
+            val px = sky()
+            square(px, x, 250, 22, rgb(50, 55, 60))
+            hit = d.process(px, t, params)
+            x -= 6
+            t += frameMs
+        }
+        assertNotNull("never caught", hit)
     }
 
     @Test
@@ -378,16 +396,17 @@ class DroneDetectorTest {
         val d = DroneDetector(w, h)
         d.process(sky(), 0, params)
         var t = frameMs
-        // Appears mid-screen and flies toward its nearest side, then leaves.
+        // Appears mid-screen and flies a short way toward its nearest side, then vanishes.
         var x = 120
-        repeat(18) {
+        repeat(12) {
             val px = sky()
             square(px, x, 250, 22, rgb(50, 55, 60))
             d.process(px, t, params)
             x -= 5
             t += frameMs
         }
-        repeat(10) {
+        // Counted once it has been gone long enough to be sure it isn't coming back.
+        repeat(25) {
             d.process(sky(), t, params)
             t += frameMs
         }
