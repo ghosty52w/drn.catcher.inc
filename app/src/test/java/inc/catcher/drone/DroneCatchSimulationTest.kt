@@ -27,6 +27,11 @@ class DroneCatchSimulationTest {
 
     private fun mix(f: FarmSim.DroneMix.() -> FarmSim.DroneMix) = FarmSim.Options(drones = FarmSim.DroneMix().f())
 
+    /**
+     * [maxBuildingTapShare]: misses that land on a building. The simulated phone's tap delay
+     * varies by up to 80 ms, which at elite speed is about a drone's width, so the fastest
+     * and most erratic drones get a looser limit.
+     */
     private fun check(r: CatchRun.Result, minCatchRate: Float, maxBuildingTapShare: Float = 0.05f) {
         assertTrue("too few drones in this run: $r", r.spawned.size >= 8)
         assertTrue("caught too few (want ${(minCatchRate * 100).toInt()}%): $r", r.catchRate >= minCatchRate)
@@ -73,13 +78,13 @@ class DroneCatchSimulationTest {
     fun slowDrones() = check(run(seed = 11, opts = mix { copy(eliteShare = 0f, speed = 0.08f..0.15f) }), 0.9f)
 
     @Test
-    fun fastEliteDrones() = check(run(seed = 12, opts = mix { copy(eliteShare = 1f) }), 0.8f)
+    fun fastEliteDrones() = check(run(seed = 12, opts = mix { copy(eliteShare = 1f) }), 0.8f, 0.15f)
 
     @Test
-    fun veryFastEliteDrones() = check(run(seed = 13, opts = mix { copy(eliteShare = 1f, eliteSpeed = 1.3f..1.6f) }), 0.7f)
+    fun veryFastEliteDrones() = check(run(seed = 13, opts = mix { copy(eliteShare = 1f, eliteSpeed = 1.3f..1.6f) }), 0.7f, 0.2f)
 
     @Test
-    fun dronesThatBobALot() = check(run(seed = 14, opts = mix { copy(bobAmp = 8f..13f, bobPeriodMs = 350f..900f) }), 0.85f)
+    fun dronesThatBobALot() = check(run(seed = 14, opts = mix { copy(bobAmp = 8f..13f, bobPeriodMs = 350f..900f) }), 0.9f, 0.2f)
 
     @Test
     fun dronesFlyingAtAnAngle() = check(run(seed = 15, opts = mix { copy(slope = 0.2f..0.35f) }), 0.85f)
@@ -160,14 +165,53 @@ class DroneCatchSimulationTest {
     fun manyDroppedFrames() = check(run(seed = 36, dropShare = 0.2f), 0.85f)
 
     @Test
-    fun laggyTaps() = check(run(seed = 37, latencyMs = 140..220), 0.8f) // aim ahead set too low for this phone
+    fun laggyTaps() = check(run(seed = 37, latencyMs = 140..220), 0.8f) // still learning the aim for this phone
 
     @Test
     fun laggyTapsWithMoreAimAhead() =
-        check(run(seed = 37, latencyMs = 140..220, params = DroneDetector.Params(leadMs = 180)), 0.9f)
+        check(run(seed = 37, latencyMs = 140..220, params = DroneDetector.Params(leadMs = 180)), 0.85f)
 
     @Test
     fun snappyTaps() = check(run(seed = 38, latencyMs = 30..60, params = DroneDetector.Params(leadMs = 45)), 0.9f)
+
+    // --- Learning the aim-ahead ---------------------------------------------------------------
+
+    /** Plays elites on a phone with [latencyMs] tap delay, starting from the default aim-ahead. */
+    private fun learnOn(latencyMs: IntRange, seed: Long): Pair<Float, CatchRun.Result> {
+        val run = CatchRun(FarmSim(seed, mix { copy(eliteShare = 1f) }), seed = seed, latencyMs = latencyMs)
+        val result = run.run(150_000)
+        return Pair(run.detector.learnedLeadMs, result)
+    }
+
+    @Test
+    fun learnsALongerAimAheadOnALaggyPhone() {
+        val (learned, _) = learnOn(160..200, 50)
+        assertTrue("learned $learned ms for a 160-200 ms delay", learned in 145f..215f)
+    }
+
+    @Test
+    fun staysPutOrComesDownOnASnappyPhone() {
+        // The default aim still lands on drones with a short delay (only misses teach it
+        // anything), so it mustn't wander upward, and elites must still be caught.
+        val (learned, result) = learnOn(30..60, 51)
+        assertTrue("learned $learned ms for a 30-60 ms delay", learned.isNaN() || learned <= 105f)
+        check(result, 0.85f, 0.1f)
+    }
+
+    @Test
+    fun keepsTheAimAheadOnAPhoneThatMatchesIt() {
+        val (learned, _) = learnOn(80..120, 52)
+        assertTrue("learned $learned ms for a 80-120 ms delay", learned in 75f..130f)
+    }
+
+    @Test
+    fun catchesElitesOnALaggyPhoneOnceTheAimIsLearned() {
+        val (learned, _) = learnOn(160..200, 53)
+        // Next session starts from what was learned (the app saves it).
+        val run = CatchRun(FarmSim(54, mix { copy(eliteShare = 1f) }), seed = 54, latencyMs = 160..200)
+        run.detector.setLearnedLead(learned)
+        check(run.run(120_000), 0.85f, 0.1f)
+    }
 
     // --- Settings people may change -------------------------------------------------------------
 

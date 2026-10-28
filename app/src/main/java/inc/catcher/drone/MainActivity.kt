@@ -82,6 +82,10 @@ class MainActivity : Activity() {
             Prefs.clearAvoidSpots(this)
             toast("Forgot all avoided spots")
         })
+        root.addView(button("Forget the learned aim ahead") {
+            Prefs.clearLearnedLead(this)
+            toast("Forgot the learned aim ahead")
+        })
         root.addView(button("Reset to defaults") {
             Prefs.reset(this)
             recreate()
@@ -122,6 +126,10 @@ class MainActivity : Activity() {
                 },
             )
             if (capture != null) append("\n📋 ${capture.report()}")
+            if (capture != null) {
+                val (ms, learned) = capture.aimAhead()
+                append("\n🎯 Aiming $ms ms ahead" + if (learned) " (learned)" else "")
+            }
             if (capture != null && capture.menuOpen) {
                 append("\n⏸ A tap opened a menu. Close it in Egg, Inc. and catching carries on.")
             }

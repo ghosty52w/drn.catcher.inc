@@ -392,6 +392,8 @@ class CatchRun(
     private val dropShare: Float = 0.04f,
     private val latencyMs: IntRange = 70..150,
     private val cooldownMs: Long = 450,
+    /** Like the app: a tap that opens a menu (building or button) is remembered and never repeated there. */
+    private val learnAvoidSpots: Boolean = true,
 ) {
     data class Result(
         val spawned: List<FarmSim.Drone>,
@@ -417,11 +419,11 @@ class CatchRun(
     /** Runs for [durationMs], sending scheduled drones until [dronesUntilMs]. */
     fun run(durationMs: Long, dronesUntilMs: Long = durationMs - 3000, scheduled: Boolean = true): Result {
         val pending = ArrayList<LongArray>() // landAtMs, x*1000, y*1000
+        val avoid = ArrayList<FloatArray>()
         var taps = 0
         var building = 0
         var button = 0
         var ground = 0
-        var lastTap = Long.MIN_VALUE / 2
         var t = 0L
         while (t < durationMs) {
             if (scheduled) sim.scheduleDrones(t, dronesUntilMs)
@@ -430,7 +432,12 @@ class CatchRun(
             pending.removeAll(due.toSet())
             for (p in due) {
                 taps++
-                when (sim.tap(p[1] / 1000f, p[2] / 1000f, p[0])) {
+                val hit = sim.tap(p[1] / 1000f, p[2] / 1000f, p[0])
+                if (learnAvoidSpots && (hit == FarmSim.Hit.BUILDING || hit == FarmSim.Hit.BUTTON)) {
+                    avoid += floatArrayOf(p[1] / 1000f / sim.w, p[2] / 1000f / sim.h)
+                    detector.setAvoidSpots(avoid.toList())
+                }
+                when (hit) {
                     FarmSim.Hit.BUILDING -> building++
                     FarmSim.Hit.BUTTON -> button++
                     FarmSim.Hit.GROUND -> ground++
@@ -439,8 +446,7 @@ class CatchRun(
             }
             if (rnd.nextFloat() >= dropShare) {
                 val target = detector.process(sim.render(t), t, params)
-                if (target != null && t - lastTap >= cooldownMs) {
-                    lastTap = t
+                if (target != null && detector.readyToTap(target, t, cooldownMs)) {
                     detector.onTapped(target, t)
                     val land = t + latencyMs.first + rnd.nextInt(latencyMs.last - latencyMs.first + 1)
                     pending += longArrayOf(land, (target.x * 1000).toLong(), (target.y * 1000).toLong())

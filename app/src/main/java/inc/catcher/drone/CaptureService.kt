@@ -84,7 +84,6 @@ class CaptureService : Service() {
 
     // Only touched on the capture thread.
     private var lastFrameMs = 0L
-    private var lastTapMs = 0L
     private var lastSettingsMs = 0L
     private var params = DroneDetector.Params()
     private var frameIntervalMs = 83L
@@ -137,7 +136,8 @@ class CaptureService : Service() {
         capW = max(64, screenW / scale)
         capH = max(64, screenH / scale)
         pixels = IntArray(capW * capH)
-        detector = DroneDetector(capW, capH)
+        savedLead = Prefs.learnedLead(this)
+        detector = DroneDetector(capW, capH).apply { setLearnedLead(savedLead) }
         readSettings()
 
         val t = HandlerThread("drone-capture").also { it.start() }
@@ -188,6 +188,27 @@ class CaptureService : Service() {
         stopSelf()
     }
 
+    /** Last learned aim-ahead saved to (or read from) settings. */
+    private var savedLead = Float.NaN
+
+    /** Saves what the detector has learned, or makes it forget if the player cleared it. */
+    private fun syncLearnedLead() {
+        val det = detector ?: return
+        val stored = Prefs.learnedLead(this)
+        if (stored.isNaN() && !savedLead.isNaN()) {
+            det.setLearnedLead(Float.NaN) // "Forget the learned aim ahead" was pressed
+        } else if (!det.learnedLeadMs.isNaN() && det.learnedLeadMs != stored) {
+            Prefs.setLearnedLead(this, det.learnedLeadMs)
+        }
+        savedLead = Prefs.learnedLead(this)
+    }
+
+    /** The aim-ahead in use (ms), and whether it was learned. */
+    fun aimAhead(): Pair<Int, Boolean> {
+        val learned = detector?.learnedLeadMs ?: Float.NaN
+        return if (params.autoLead && !learned.isNaN()) Pair(learned.toInt(), true) else Pair(params.leadMs, false)
+    }
+
     fun refreshControls() {
         val label = when {
             paused -> "⏸ $taps"
@@ -220,6 +241,7 @@ class CaptureService : Service() {
     }
 
     private fun readSettings() {
+        syncLearnedLead()
         params = Prefs.params(this)
         frameIntervalMs = 1000L / Prefs.get(this, Prefs.FPS)
         cooldownMs = Prefs.get(this, Prefs.COOLDOWN).toLong()
@@ -274,8 +296,7 @@ class CaptureService : Service() {
 
             val target = det.process(px, now, params, excludedRect())
             watchForMenu(det, det.signature(px, params), now)
-            if (menus.menuOpen || target == null || now - lastTapMs < cooldownMs) return
-            lastTapMs = now
+            if (menus.menuOpen || target == null || !det.readyToTap(target, now, cooldownMs)) return
             det.onTapped(target, now)
             menus.onTapDecided(det.signature(px, params), target.x, target.y, now)
 

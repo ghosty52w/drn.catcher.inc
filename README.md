@@ -51,8 +51,8 @@ a drone but wasn't tapped, which rule stopped it (for example "kept changing dir
 | Skipped: "didn't fly far enough" | Lower **Shortest flight** |
 | Skipped: "didn't come in from the side" | Turn off **Only tap things that fly in from the side** |
 | Skipped: "still there after every retry" | The taps are missing: adjust **Aim ahead** |
-| Taps land behind drones | Raise **Aim ahead** |
-| Taps land in front of drones | Lower **Aim ahead** |
+| Taps land behind/in front of fast drones | Leave **Learn the aim ahead by itself** on and give it a few minutes; or set **Aim ahead** yourself |
+| Taps the contract eggs or event pills | Keep **Never tap near the contract eggs and event pills** on |
 | Taps things that aren't drones | Raise **Shortest flight**, **Motion threshold** or **Smallest drone**, or shrink the search area |
 | Never taps drones at all | Turn off **Only tap things that fly in from the side** |
 | Battery drain | Lower **Checks per second** or raise **Downscale** |
@@ -74,9 +74,28 @@ a drone but wasn't tapped, which rule stopped it (for example "kept changing dir
   **Forget spots it learned to avoid** clears the list.
 - It can also press Back to close such a menu. If Back takes you out of Egg, Inc. instead, it
   brings the game straight back and switches this off.
-- A tap that misses is retried up to 4 times, aiming a little further ahead, then behind.
+- A tap that misses is retried up to 4 times (a fast drone gets a second try after 0.15 s),
+  aiming a little later, then earlier.
+- **Aim ahead learns itself**: when the first taps at fast drones keep missing, it varies their
+  aim slightly and moves toward the aims that catch drones. It's saved, so it carries over to
+  the next session. The main screen shows the current value.
+- It never taps the strip down the left where the contract eggs and event pills are (however
+  long that column gets) or the tab on the right.
 - `TapService` (accessibility service) taps the predicted position, draws a brief ring there,
   and checks Egg, Inc. is in the foreground.
+
+## Tests
+
+The detector is plain Kotlin and has three test suites (`app/src/test`):
+
+- `DroneDetectorTest`: focused cases (spinning, wobbling, rising things are ignored; bobbing,
+  late-appearing and missed drones are caught; avoided spots and no-tap areas are respected).
+- `MenuWatcherTest`: telling an opened menu from a passing flash.
+- `DroneCatchSimulationTest`: end to end on `FarmSim`, a stand-in for the farm laid out after a
+  real screenshot, with many kinds of drones (slow, elite, bobbing, angled, small, white...),
+  phones (laggy, snappy, slow, dropping frames) and farms (contract columns of different
+  lengths, noisy or dim screens). A tap counts only if it lands on the drone when it reaches the
+  screen; every scenario also checks taps stay off the game's buttons and buildings.
 
 ## Build it yourself
 
