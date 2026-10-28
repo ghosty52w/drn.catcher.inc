@@ -44,10 +44,23 @@ class DroneDetector(val width: Int, val height: Int) {
         val maxVerticalShare: Float = 0.87f,
         /** No taps for this long after the whole scene changes (a menu opening/closing). */
         val settleMs: Int = 1200,
+        /** No taps for this long after starting or resuming, while the background is learned. */
+        val warmupMs: Int = 1000,
         /** Only tap things that first appeared near the left/right edge or the region's top/bottom. */
         val requireEdgeEntry: Boolean = true,
         /** How close to the left/right edge (in screen widths) counts as entering from it. */
         val edgeMargin: Float = 0.15f,
+        /**
+         * A drone hidden behind on-screen buttons first shows up part-way in. Such late
+         * arrivals are still tapped if they head away from their nearest side and fly at
+         * least this far (in screen widths) in a steady direction.
+         */
+        val lateEntryTravel: Float = 0.22f,
+        /**
+         * How closely the current heading must match the overall path (cosine of the angle
+         * between them). Drones keep their heading; parts of something spinning don't.
+         */
+        val minAlignment: Float = 0.92f,
         /** Give up on something after tapping it this many times without it disappearing. */
         val maxTapsPerTrack: Int = 3,
         /** How far ahead (in ms) to aim along the drone's path. */
@@ -84,6 +97,8 @@ class DroneDetector(val width: Int, val height: Int) {
     private var bgBottom = -1
     private var nextId = 1
 
+    private var warmUntilMs = Long.MIN_VALUE
+
     /** When the last whole-scene change was seen, e.g. a menu opening. */
     var lastSceneChangeMs = Long.MIN_VALUE
         private set
@@ -116,6 +131,7 @@ class DroneDetector(val width: Int, val height: Int) {
         val bottom = (p.roiBottom * height).toInt().coerceIn(top + 1, height)
         if (!hasBg || top != bgTop || bottom != bgBottom) {
             seed(px, top, bottom)
+            warmUntilMs = nowMs + p.warmupMs
             return null
         }
 
@@ -131,6 +147,7 @@ class DroneDetector(val width: Int, val height: Int) {
         updateTracks(blobs, nowMs, p)
         zones.removeAll { it.untilMs <= nowMs }
 
+        if (nowMs < warmUntilMs) return null
         if (lastSceneChangeMs != Long.MIN_VALUE && nowMs - lastSceneChangeMs < p.settleMs) return null
 
         val edge = p.edgeMargin * width
@@ -138,18 +155,21 @@ class DroneDetector(val width: Int, val height: Int) {
         var best: Track? = null
         for (t in tracks) {
             if (t.lastMs != nowMs || t.hits < p.confirmHits || t.taps >= p.maxTapsPerTrack) continue
-            if (p.requireEdgeEntry &&
-                t.originX > edge && t.originX < width - 1 - edge &&
-                t.originY > top + vEdge && t.originY < bottom - 1 - vEdge
-            ) continue
             val speed = hypot(t.vx, t.vy) / width
             if (speed < p.minSpeed || speed > p.maxSpeed) continue
             val dx = t.x - t.originX
             val dy = t.y - t.originY
             val travel = hypot(dx, dy)
             if (travel < p.minTravel * width) continue
+            val enteredFromEdge = t.originX <= edge || t.originX >= width - 1 - edge ||
+                t.originY <= top + vEdge || t.originY >= bottom - 1 - vEdge
+            if (p.requireEdgeEntry && !enteredFromEdge) {
+                val headingAwayFromNearSide = if (t.originX < width / 2f) dx > 0 else dx < 0
+                if (!headingAwayFromNearSide || travel < p.lateEntryTravel * width) continue
+            }
             if (travel < p.minStraightness * t.pathLength) continue
             if (abs(dy) > p.maxVerticalShare * travel) continue
+            if ((t.vx * dx + t.vy * dy) / (speed * width * travel) < p.minAlignment) continue
             if (zones.any { hypot(t.x - it.x, t.y - it.y) < it.r }) continue
             if (best == null || t.hits > best.hits) best = t
         }

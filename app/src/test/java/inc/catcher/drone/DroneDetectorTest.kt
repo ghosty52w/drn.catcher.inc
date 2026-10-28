@@ -10,7 +10,8 @@ class DroneDetectorTest {
 
     private val w = 270
     private val h = 600
-    private val params = DroneDetector.Params()
+    /** Most tests start a drone straight away, so skip the start-up warm-up. */
+    private val params = DroneDetector.Params(warmupMs = 0)
     private val frameMs = 83L
 
     private fun rgb(r: Int, g: Int, b: Int) = (r shl 16) or (g shl 8) or b
@@ -194,8 +195,9 @@ class DroneDetectorTest {
 
     @Test
     fun learnsToIgnoreLoopingAnimations() {
+        val p = DroneDetector.Params()
         val d = DroneDetector(w, h)
-        d.process(sky(), 0, params)
+        d.process(sky(), 0, p)
         // Something spinning in place (a windmill, a wheel): parts of its circle look like
         // short straight flights, but it never came in from the edge.
         val falseTaps = ArrayList<Int>()
@@ -203,7 +205,7 @@ class DroneDetectorTest {
             val px = sky()
             val a = i * 2 * Math.PI / 12
             square(px, 135 + (40 * Math.cos(a)).toInt(), 250 + (40 * Math.sin(a)).toInt(), 22, rgb(200, 60, 60))
-            if (d.process(px, (i + 1) * frameMs, params) != null) falseTaps.add(i)
+            if (d.process(px, (i + 1) * frameMs, p) != null) falseTaps.add(i)
         }
         assertTrue("tapped the spinning thing at frames $falseTaps", falseTaps.isEmpty())
 
@@ -214,7 +216,7 @@ class DroneDetectorTest {
         while (hit == null && x < w) {
             val px = sky()
             square(px, x, 150, 22, rgb(50, 55, 60))
-            hit = d.process(px, t, params)
+            hit = d.process(px, t, p)
             x += 6
             t += frameMs
         }
@@ -244,28 +246,86 @@ class DroneDetectorTest {
     }
 
     @Test
-    fun ignoresThingsThatStartMidScreen() {
+    fun ignoresShortMovesThatStartMidScreen() {
         val d = DroneDetector(w, h)
         d.process(sky(), 0, params)
+        // Something mid-screen slides a little way and stops, like a panel animating in.
         var x = 100
-        repeat(25) { i ->
+        repeat(30) { i ->
             val px = sky()
             square(px, x, 250, 22, rgb(50, 55, 60))
             assertNull(d.process(px, (i + 1) * frameMs, params))
-            x += 4
+            if (i < 8) x += 5
         }
-        // ...unless edge entry is switched off.
-        val loose = DroneDetector(w, h)
-        val p = params.copy(requireEdgeEntry = false)
-        loose.process(sky(), 0, p)
-        x = 100
-        var hit: DroneDetector.Target? = null
-        repeat(25) { i ->
+    }
+
+    @Test
+    fun ignoresMidScreenThingsHeadingToTheirNearSide() {
+        val d = DroneDetector(w, h)
+        d.process(sky(), 0, params)
+        var x = 120
+        repeat(18) { i ->
             val px = sky()
             square(px, x, 250, 22, rgb(50, 55, 60))
-            hit = hit ?: loose.process(px, (i + 1) * frameMs, p)
-            x += 4
+            assertNull(d.process(px, (i + 1) * frameMs, params))
+            x -= 5
+        }
+    }
+
+    @Test
+    fun catchesDronesComingOutFromBehindSideButtons() {
+        val d = DroneDetector(w, h)
+        // A column of game buttons down the left side, drawn on top of the drone.
+        fun withButtons(px: IntArray): IntArray {
+            for (y in 150 until 350) for (x in 0 until 70) px[y * w + x] = rgb(250, 190, 40)
+            return px
+        }
+        d.process(withButtons(sky()), 0, params)
+        var x = -10
+        var t = frameMs
+        var hit: DroneDetector.Target? = null
+        var hitX = 0
+        while (hit == null && x < w) {
+            val px = sky()
+            square(px, x, 250, 22, rgb(50, 55, 60))
+            hit = d.process(withButtons(px), t, params)
+            hitX = x
+            x += 6
+            t += frameMs
+        }
+        assertNotNull("drone coming out from behind the buttons was missed", hit)
+        assertEquals(250f, hit!!.y, 3f)
+        assertTrue("caught too late, at x=$hitX", hitX < w / 2)
+    }
+
+    @Test
+    fun edgeEntryCanBeSwitchedOff() {
+        val p = params.copy(requireEdgeEntry = false)
+        val d = DroneDetector(w, h)
+        d.process(sky(), 0, p)
+        var x = 120
+        var hit: DroneDetector.Target? = null
+        repeat(18) { i ->
+            val px = sky()
+            square(px, x, 250, 22, rgb(50, 55, 60))
+            hit = hit ?: d.process(px, (i + 1) * frameMs, p)
+            x -= 5
         }
         assertNotNull(hit)
+    }
+
+    @Test
+    fun neverTapsSpinningThingsAnywhere() {
+        val p = DroneDetector.Params()
+        for (cx in listOf(80, 135, 190)) for (radius in listOf(25, 40, 60)) for (period in listOf(8, 12, 20, 30)) {
+            val d = DroneDetector(w, h)
+            d.process(sky(), 0, p)
+            repeat(300) { i ->
+                val px = sky()
+                val a = i * 2 * Math.PI / period
+                square(px, cx + (radius * Math.cos(a)).toInt(), 250 + (radius * Math.sin(a)).toInt(), 22, rgb(200, 60, 60))
+                assertNull("tapped spinner cx=$cx r=$radius period=$period at frame $i", d.process(px, (i + 1) * frameMs, p))
+            }
+        }
     }
 }

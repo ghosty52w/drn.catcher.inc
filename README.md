@@ -56,7 +56,8 @@ bottom. Adjust **Search area top / bottom** until it does.
 - `DroneDetector` keeps a slowly updating background picture of the search area, marks pixels
   that changed, groups them into blobs, and follows blobs across frames. A blob is only tapped
   once it has flown in from the side, travelled a real distance in a fairly straight, mostly
-  sideways line, and is drone-sized and drone-fast. Animated buildings and buttons wobble or
+  sideways line, and is drone-sized and drone-fast. A drone that was hidden behind the game's
+  side buttons and first shows up part-way in is still caught once it has flown a bit further. Animated buildings and buttons wobble or
   spin in place, so they don't qualify; areas that animate constantly are learned and ignored.
   Big sudden changes (menus opening) reset the model, and nothing is tapped until the screen
   settles.
