@@ -390,10 +390,12 @@ class CatchRun(
     seed: Long = 7,
     private val frameMs: IntRange = 73..93,
     private val dropShare: Float = 0.04f,
-    private val latencyMs: IntRange = 70..150,
+    private val latencyMs: IntRange = 90..170,
     private val cooldownMs: Long = 450,
     /** Like the app: a tap that opens a menu (building or button) is remembered and never repeated there. */
     private val learnAvoidSpots: Boolean = true,
+    /** Error (±ms) in the time each frame is stamped with, like a phone's uneven frame delivery. */
+    private val stampJitterMs: Int = 0,
 ) {
     data class Result(
         val spawned: List<FarmSim.Drone>,
@@ -420,6 +422,7 @@ class CatchRun(
     fun run(durationMs: Long, dronesUntilMs: Long = durationMs - 3000, scheduled: Boolean = true): Result {
         val pending = ArrayList<LongArray>() // landAtMs, x*1000, y*1000
         val avoid = ArrayList<FloatArray>()
+        var lastStamp = Long.MIN_VALUE
         var taps = 0
         var building = 0
         var button = 0
@@ -445,9 +448,15 @@ class CatchRun(
                 }
             }
             if (rnd.nextFloat() >= dropShare) {
-                val target = detector.process(sim.render(t), t, params)
-                if (target != null && detector.readyToTap(target, t, cooldownMs)) {
-                    detector.onTapped(target, t)
+                val stamp = if (stampJitterMs == 0) t else t - stampJitterMs + rnd.nextInt(2 * stampJitterMs + 1)
+                if (stamp <= lastStamp) {
+                    t += frameMs.first
+                    continue
+                }
+                lastStamp = stamp
+                val target = detector.process(sim.render(t), stamp, params)
+                if (target != null && detector.readyToTap(target, stamp, cooldownMs)) {
+                    detector.onTapped(target, stamp)
                     val land = t + latencyMs.first + rnd.nextInt(latencyMs.last - latencyMs.first + 1)
                     pending += longArrayOf(land, (target.x * 1000).toLong(), (target.y * 1000).toLong())
                 }

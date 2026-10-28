@@ -68,8 +68,8 @@ class DroneDetector(val width: Int, val height: Int) {
         val minAlignment: Float = 0.92f,
         /** Give up on something after tapping it this many times without it disappearing. */
         val maxTapsPerTrack: Int = 4,
-        /** How far ahead (in ms) to aim along the drone's path: the delay until a tap lands. */
-        val leadMs: Int = 100,
+        /** How far ahead (in ms) to aim along the drone's path: the delay from screen capture until a tap lands. */
+        val leadMs: Int = 120,
         /** Learn the aim-ahead from which taps catch fast drones, starting from [leadMs]. */
         val autoLead: Boolean = true,
     )
@@ -360,10 +360,16 @@ class DroneDetector(val width: Int, val height: Int) {
         return best
     }
 
-    /** Where [t] will be at [atMs], carrying on at its current velocity. */
+    /**
+     * Where [t] will be at [atMs]: carrying on at its current speed sideways, and at its
+     * average climb over the last half second or more up and down, so bobbing doesn't
+     * throw the aim above or below it.
+     */
     private fun aimPoint(t: Track, atMs: Long): Pair<Float, Float> {
         val dt = (atMs - t.lastMs) / 1000f
-        return Pair(t.x + t.vx * dt, t.y + t.vy * dt)
+        val ref = headingReference(t)
+        val vy = if (ref != null) (t.y - ref.y) / ((t.lastMs - ref.ms) / 1000f) else t.vy
+        return Pair(t.x + t.vx * dt, t.y + vy * dt)
     }
 
     /**
@@ -552,7 +558,7 @@ class DroneDetector(val width: Int, val height: Int) {
                 val reach = when {
                     t.hits == 1 -> p.maxSpeed * width * dt + b.size
                     t.hits == 2 -> 0.5f * p.maxSpeed * width * min(dt, 0.2f) + b.size + lost
-                    else -> 0.75f * b.size + 0.5f * speed * min(dt, 0.2f) + STRAY_PX + lost
+                    else -> b.size + 0.5f * speed * min(dt, 0.2f) + STRAY_PX + lost
                 }
                 val d = hypot(b.cx - predX, b.cy - predY)
                 if (d < reach && d < bestD) {
@@ -677,7 +683,7 @@ class DroneDetector(val width: Int, val height: Int) {
         private const val LOST_DRIFT = 0.35f
 
         /** Extra room (capture pixels) for an established track to stray from its prediction. */
-        private const val STRAY_PX = 4f
+        private const val STRAY_PX = 6f
 
         /** Track positions are sampled this often for the wobble and turning checks. */
         private const val SAMPLE_MS = 300L

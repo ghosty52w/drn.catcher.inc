@@ -84,6 +84,7 @@ class CaptureService : Service() {
 
     // Only touched on the capture thread.
     private var lastFrameMs = 0L
+    private var lastShotMs = 0L
     private var lastSettingsMs = 0L
     private var params = DroneDetector.Params()
     private var frameIntervalMs = 83L
@@ -272,6 +273,11 @@ class CaptureService : Service() {
                 return
             }
             if (image.width != capW || image.height != capH) return
+            // When the screen was captured. Processing starts a varying while later, and
+            // timing motion by that would make drones seem to jump about.
+            val shotMs = (image.timestamp / 1_000_000).takeIf { it in (now - 1000)..now } ?: now
+            if (shotMs <= lastShotMs) return
+            lastShotMs = shotMs
 
             val plane = image.planes[0]
             val buf = plane.buffer
@@ -294,10 +300,10 @@ class CaptureService : Service() {
                 }
             }
 
-            val target = det.process(px, now, params, excludedRect())
+            val target = det.process(px, shotMs, params, excludedRect())
             watchForMenu(det, det.signature(px, params), now)
-            if (menus.menuOpen || target == null || !det.readyToTap(target, now, cooldownMs)) return
-            det.onTapped(target, now)
+            if (menus.menuOpen || target == null || !det.readyToTap(target, shotMs, cooldownMs)) return
+            det.onTapped(target, shotMs)
             menus.onTapDecided(det.signature(px, params), target.x, target.y, now)
 
             val sx = target.x * screenW / capW

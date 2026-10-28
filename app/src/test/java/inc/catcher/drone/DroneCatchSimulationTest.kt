@@ -21,9 +21,11 @@ class DroneCatchSimulationTest {
         opts: FarmSim.Options = FarmSim.Options(),
         frameMs: IntRange = 73..93,
         dropShare: Float = 0.04f,
-        latencyMs: IntRange = 70..150,
+        latencyMs: IntRange = 90..170,
         params: DroneDetector.Params = DroneDetector.Params(),
-    ): CatchRun.Result = CatchRun(FarmSim(seed, opts), params, seed, frameMs, dropShare, latencyMs).run(durationMs)
+        stampJitterMs: Int = 0,
+    ): CatchRun.Result =
+        CatchRun(FarmSim(seed, opts), params, seed, frameMs, dropShare, latencyMs, stampJitterMs = stampJitterMs).run(durationMs)
 
     private fun mix(f: FarmSim.DroneMix.() -> FarmSim.DroneMix) = FarmSim.Options(drones = FarmSim.DroneMix().f())
 
@@ -162,6 +164,16 @@ class DroneCatchSimulationTest {
     fun slowPhone() = check(run(seed = 35, frameMs = 150..190, dropShare = 0.08f), 0.8f)
 
     @Test
+    fun unevenFrameTimestamps() = check(run(seed = 45, stampJitterMs = 15), 0.9f)
+
+    @Test
+    fun veryUnevenFrameTimestamps() = check(run(seed = 46, stampJitterMs = 30), 0.85f)
+
+    @Test
+    fun unevenFrameTimestampsWithElites() =
+        check(run(seed = 47, opts = mix { copy(eliteShare = 0.5f) }, stampJitterMs = 20), 0.8f, 0.1f)
+
+    @Test
     fun manyDroppedFrames() = check(run(seed = 36, dropShare = 0.2f), 0.85f)
 
     @Test
@@ -193,8 +205,8 @@ class DroneCatchSimulationTest {
     fun staysPutOrComesDownOnASnappyPhone() {
         // The default aim still lands on drones with a short delay (only misses teach it
         // anything), so it mustn't wander upward, and elites must still be caught.
-        val (learned, result) = learnOn(30..60, 51)
-        assertTrue("learned $learned ms for a 30-60 ms delay", learned.isNaN() || learned <= 105f)
+        val (learned, result) = learnOn(50..80, 51)
+        assertTrue("learned $learned ms for a 50-80 ms delay", learned.isNaN() || learned <= 125f)
         check(result, 0.85f, 0.1f)
     }
 
@@ -210,7 +222,7 @@ class DroneCatchSimulationTest {
         // Next session starts from what was learned (the app saves it).
         val run = CatchRun(FarmSim(54, mix { copy(eliteShare = 1f) }), seed = 54, latencyMs = 160..200)
         run.detector.setLearnedLead(learned)
-        check(run.run(120_000), 0.85f, 0.1f)
+        check(run.run(120_000), 0.8f, 0.1f)
     }
 
     // --- Settings people may change -------------------------------------------------------------

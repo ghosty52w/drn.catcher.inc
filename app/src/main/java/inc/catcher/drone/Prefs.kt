@@ -35,7 +35,7 @@ object Prefs {
         "How far something must fly before it's tapped. Raise if it taps animations.")
     val MIN_SPEED = Slider("min_speed", "Slowest drone", 0, 50, 4, "% of width/s",
         "Things slower than this (clouds, counters) are ignored.")
-    val LEAD = Slider("lead_ms", "Aim ahead", 0, 400, 100, "ms",
+    val LEAD = Slider("lead_ms", "Aim ahead", 0, 400, 120, "ms",
         "Where it starts. With learning on, it adjusts itself to your phone as it catches fast drones.")
     val COOLDOWN = Slider("cooldown_ms", "Pause between taps", 100, 3000, 450, "ms", "")
     val FPS = Slider("fps", "Checks per second", 2, 30, 12, "/s",
