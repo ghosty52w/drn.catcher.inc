@@ -49,7 +49,11 @@ class CaptureService : Service() {
         private const val MENU_CLOSED_DIFFERENCE = 0.2f
 
         /** At most one restart of Egg, Inc. this often, so a mistaken menu can't keep restarting it. */
-        private const val MIN_REOPEN_GAP_MS = 30_000L
+        private const val MIN_REOPEN_GAP_MS = 15_000L
+
+        /** A restart that didn't work is tried again this much later, up to this many times. */
+        private const val RESTART_RETRY_MS = 3000L
+        private const val MAX_RESTART_ATTEMPTS = 5
 
         /** After restarting Egg, Inc., give it this long to load before catching again. */
         private const val RESTART_LOAD_MS = 6000L
@@ -113,7 +117,10 @@ class CaptureService : Service() {
     private var onlyEgg = true
     private var showMarks = true
     private var autoReopen = true
+
+    // Only touched on the main thread.
     private var lastReopenMs = Long.MIN_VALUE / 2
+    private var restartPending = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -363,7 +370,7 @@ class CaptureService : Service() {
         menuBaseline = before
         menuOpen = true
         refreshControls()
-        if (!autoReopen || now - lastReopenMs < MIN_REOPEN_GAP_MS) {
+        if (!autoReopen) {
             main.post {
                 Toast.makeText(
                     this,
@@ -373,23 +380,58 @@ class CaptureService : Service() {
             }
             return
         }
-        // Closing Egg, Inc. completely and starting it again gets rid of the menu.
-        lastReopenMs = now
-        main.post {
-            TapService.instance?.restartEggInc { relaunched ->
-                if (relaunched && instance != null) {
-                    // The menu is gone, but the reloaded farm won't look exactly like it did
-                    // before the tap, so don't wait for that: catch again once it has loaded.
-                    main.postDelayed({
-                        menuOpen = false
-                        freshStart = true
-                        refreshControls()
-                    }, RESTART_LOAD_MS)
-                    menusClosed++
-                    refreshControls()
-                }
-            }
+        main.post { restartToCloseMenu() }
+    }
+
+    /**
+     * Closes Egg, Inc. completely and starts it again to get rid of the menu (main thread).
+     * Never gives up while the menu is still there: if the last restart was too recent it
+     * waits, and if a restart doesn't work it tries again a little later.
+     */
+    private fun restartToCloseMenu(attempt: Int = 0) {
+        if (instance == null || !menuOpen || restartPending) return
+        val wait = lastReopenMs + MIN_REOPEN_GAP_MS - SystemClock.uptimeMillis()
+        if (wait > 0) {
+            restartPending = true
+            main.postDelayed({
+                restartPending = false
+                restartToCloseMenu(attempt)
+            }, wait)
+            return
         }
+        val svc = TapService.instance
+        if (svc == null) {
+            retryRestart(attempt)
+            return
+        }
+        restartPending = true
+        svc.restartEggInc { relaunched ->
+            restartPending = false
+            if (!relaunched) {
+                retryRestart(attempt)
+                return@restartEggInc
+            }
+            lastReopenMs = SystemClock.uptimeMillis()
+            if (instance == null) return@restartEggInc
+            menusClosed++
+            refreshControls()
+            // The menu is gone, but the reloaded farm won't look exactly like it did before
+            // the tap, so don't wait for that: catch again once it has loaded.
+            main.postDelayed({
+                menuOpen = false
+                freshStart = true
+                refreshControls()
+            }, RESTART_LOAD_MS)
+        }
+    }
+
+    private fun retryRestart(attempt: Int) {
+        if (attempt >= MAX_RESTART_ATTEMPTS) return
+        restartPending = true
+        main.postDelayed({
+            restartPending = false
+            restartToCloseMenu(attempt + 1)
+        }, RESTART_RETRY_MS)
     }
 
 

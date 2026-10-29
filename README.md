@@ -73,7 +73,9 @@ a drone but wasn't tapped, which rule stopped it (for example "kept changing dir
   until the menu is closed (the floating button shows "⏸ menu"; tap it to carry on anyway).
   **Forget spots it learned to avoid** clears the list.
 - It then gets rid of the menu by closing Egg, Inc. (swiping it away in Recent apps) and
-  starting it again (at most once every 30 seconds; can be switched off).
+  starting it again, then catches again once the game has loaded (at most one restart every
+  15 seconds; it waits rather than giving up, and retries if a restart doesn't work; can be
+  switched off).
 - A tap that misses is retried up to 4 times, aiming a little further ahead, then behind.
 - `TapService` (accessibility service) taps the predicted position, draws a brief ring there,
   and checks Egg, Inc. is in the foreground.

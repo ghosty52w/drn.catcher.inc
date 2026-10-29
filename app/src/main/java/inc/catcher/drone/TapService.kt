@@ -115,10 +115,16 @@ class TapService : AccessibilityService() {
     /**
      * Closes Egg, Inc. completely and starts it again, which gets rid of any menu: opens
      * Recent apps (where Egg, Inc., the app on screen, is the card in the middle), swipes
-     * that card away, goes home and launches Egg, Inc. [onDone] gets whether it relaunched.
+     * that card away, goes home and launches Egg, Inc. If the tap took us out of Egg, Inc.
+     * altogether (e.g. an event opened a web page), just goes back to it. [onDone] gets
+     * whether Egg, Inc. was (re)launched.
      */
     fun restartEggInc(onDone: (Boolean) -> Unit) {
-        if (!isEggIncForeground() || !performGlobalAction(GLOBAL_ACTION_RECENTS)) {
+        if (!isEggIncForeground()) {
+            onDone(bringEggIncToFront())
+            return
+        }
+        if (!performGlobalAction(GLOBAL_ACTION_RECENTS)) {
             onDone(false)
             return
         }
