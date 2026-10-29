@@ -51,6 +51,9 @@ class CaptureService : Service() {
         /** At most one restart of Egg, Inc. this often, so a mistaken menu can't keep restarting it. */
         private const val MIN_REOPEN_GAP_MS = 30_000L
 
+        /** After restarting Egg, Inc., give it this long to load before catching again. */
+        private const val RESTART_LOAD_MS = 6000L
+
         @Volatile
         var instance: CaptureService? = null
             private set
@@ -100,6 +103,10 @@ class CaptureService : Service() {
     private var beforeTapX = 0f
     private var beforeTapY = 0f
     private var menuBaseline: IntArray? = null
+
+    /** Set once a restarted Egg, Inc. has loaded: start afresh on the next frame. */
+    @Volatile
+    private var freshStart = false
     private var params = DroneDetector.Params()
     private var frameIntervalMs = 83L
     private var cooldownMs = 450L
@@ -258,6 +265,11 @@ class CaptureService : Service() {
                 readSettings()
             }
             val det = detector ?: return
+            if (freshStart) {
+                freshStart = false
+                menuBaseline = null
+                det.reset()
+            }
             if (paused) {
                 det.reset()
                 return
@@ -366,6 +378,13 @@ class CaptureService : Service() {
         main.post {
             TapService.instance?.restartEggInc { relaunched ->
                 if (relaunched && instance != null) {
+                    // The menu is gone, but the reloaded farm won't look exactly like it did
+                    // before the tap, so don't wait for that: catch again once it has loaded.
+                    main.postDelayed({
+                        menuOpen = false
+                        freshStart = true
+                        refreshControls()
+                    }, RESTART_LOAD_MS)
                     menusClosed++
                     refreshControls()
                 }
