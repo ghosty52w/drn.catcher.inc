@@ -72,8 +72,8 @@ a drone but wasn't tapped, which rule stopped it (for example "kept changing dir
   just before the tap), it remembers that spot and never taps there again, and stops tapping
   until the menu is closed (the floating button shows "⏸ menu"; tap it to carry on anyway).
   **Forget spots it learned to avoid** clears the list.
-- It can also press Back to close such a menu. If Back takes you out of Egg, Inc. instead, it
-  brings the game straight back and switches this off.
+- It then closes the menu by switching to Drone Catcher for a second and reopening Egg, Inc.
+  (at most once every 10 seconds; can be switched off).
 - A tap that misses is retried up to 4 times, aiming a little further ahead, then behind.
 - `TapService` (accessibility service) taps the predicted position, draws a brief ring there,
   and checks Egg, Inc. is in the foreground.

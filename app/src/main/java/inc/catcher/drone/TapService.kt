@@ -107,7 +107,16 @@ class TapService : AccessibilityService() {
         return dispatchGesture(gesture, null, null)
     }
 
-    fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
+    /** Brings Drone Catcher's own screen to the front (leaving Egg, Inc. closes its menus). */
+    fun openDroneCatcher(): Boolean = try {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        )
+        true
+    } catch (e: RuntimeException) {
+        false
+    }
 
     /** Brings Egg, Inc. back to the front (resuming it if it's still running). */
     fun bringEggIncToFront(): Boolean {

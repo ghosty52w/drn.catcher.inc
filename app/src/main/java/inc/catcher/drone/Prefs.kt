@@ -49,9 +49,9 @@ object Prefs {
     val LAUNCH_EGG = Toggle("launch_egg", "Open Egg, Inc. after starting", true)
     val MARKERS = Toggle("markers", "Show a ring where it taps", true)
     val EDGE_ENTRY = Toggle("edge_entry", "Only tap things that fly in from the side", true)
-    val AUTO_BACK = Toggle("auto_back", "Press Back if a tap opens a menu", true)
+    val AUTO_REOPEN = Toggle("auto_reopen", "If a tap opens a menu, switch to this app and back to close it", true)
 
-    val TOGGLES = listOf(ONLY_EGG, EDGE_ENTRY, AUTO_BACK, LAUNCH_EGG, MARKERS)
+    val TOGGLES = listOf(ONLY_EGG, EDGE_ENTRY, AUTO_REOPEN, LAUNCH_EGG, MARKERS)
 
     fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 

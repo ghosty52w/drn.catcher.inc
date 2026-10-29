@@ -48,8 +48,11 @@ class CaptureService : Service() {
         /** The menu counts as closed once the screen is this close to how it looked before the tap. */
         private const val MENU_CLOSED_DIFFERENCE = 0.2f
 
-        /** How long after pressing Back to check we're still in Egg, Inc. */
-        private const val BACK_VERIFY_MS = 900L
+        /** How long to stay in this app before reopening Egg, Inc. to close a menu. */
+        private const val REOPEN_DELAY_MS = 1000L
+
+        /** At most one switch away and back this often, so a mistaken menu can't bounce us around. */
+        private const val MIN_REOPEN_GAP_MS = 10_000L
 
         @Volatile
         var instance: CaptureService? = null
@@ -71,11 +74,6 @@ class CaptureService : Service() {
     /** A tap of ours opened a menu that is still open; no taps until it closes. */
     @Volatile
     var menuOpen = false
-        private set
-
-    /** Set when Back took us out of Egg, Inc. instead of closing a menu. */
-    @Volatile
-    var backLeftGame = false
         private set
 
     /** When the last tap was actually sent (main thread clock = uptime). */
@@ -110,8 +108,8 @@ class CaptureService : Service() {
     private var cooldownMs = 450L
     private var onlyEgg = true
     private var showMarks = true
-    @Volatile
-    private var autoBack = true
+    private var autoReopen = true
+    private var lastReopenMs = Long.MIN_VALUE / 2
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -244,7 +242,7 @@ class CaptureService : Service() {
         cooldownMs = Prefs.get(this, Prefs.COOLDOWN).toLong()
         onlyEgg = Prefs.get(this, Prefs.ONLY_EGG)
         showMarks = Prefs.get(this, Prefs.MARKERS)
-        autoBack = Prefs.get(this, Prefs.AUTO_BACK)
+        autoReopen = Prefs.get(this, Prefs.AUTO_REOPEN)
         detector?.setAvoidSpots(Prefs.avoidSpots(this))
     }
 
@@ -356,7 +354,7 @@ class CaptureService : Service() {
         menuBaseline = before
         menuOpen = true
         refreshControls()
-        if (!autoBack) {
+        if (!autoReopen || now - lastReopenMs < MIN_REOPEN_GAP_MS) {
             main.post {
                 Toast.makeText(
                     this,
@@ -366,29 +364,20 @@ class CaptureService : Service() {
             }
             return
         }
+        // Switching to this app and back to Egg, Inc. closes the menu.
+        lastReopenMs = now
         main.post {
             val svc = TapService.instance ?: return@post
-            if (!svc.isEggIncForeground() || !svc.pressBack()) return@post
-            menusClosed++
-            refreshControls()
-            main.postDelayed({ returnToGameIfBackLeftIt() }, BACK_VERIFY_MS)
+            if (!svc.isEggIncForeground() || !svc.openDroneCatcher()) return@post
+            main.postDelayed({
+                if (instance != null && TapService.instance?.bringEggIncToFront() == true) {
+                    menusClosed++
+                    refreshControls()
+                }
+            }, REOPEN_DELAY_MS)
         }
     }
 
-    /** Back exited Egg, Inc. instead of closing a menu: bring the game back and stop using Back. */
-    private fun returnToGameIfBackLeftIt() {
-        val svc = TapService.instance ?: return
-        if (instance == null || svc.isEggIncForeground()) return
-        svc.bringEggIncToFront()
-        autoBack = false
-        backLeftGame = true
-        Prefs.set(this, Prefs.AUTO_BACK, false)
-        Toast.makeText(
-            this,
-            "Back left Egg, Inc. instead of closing a menu, so \"Press Back if a tap opens a menu\" is now off",
-            Toast.LENGTH_LONG,
-        ).show()
-    }
 
     /** Our floating button, mapped into capture coordinates, so its updates aren't seen as motion. */
     private fun excludedRect(): IntArray? {

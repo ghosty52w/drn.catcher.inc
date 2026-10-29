@@ -128,10 +128,7 @@ class MainActivity : Activity() {
             val avoided = Prefs.avoidSpots(this@MainActivity).size
             if (avoided > 0) append("\n🚫 Avoiding $avoided spots where a tap opened a menu")
             if (capture != null && capture.menusClosed > 0) {
-                append("\n↩ Closed ${capture.menusClosed} menus opened by mistake")
-            }
-            if (capture != null && capture.backLeftGame) {
-                append("\n⚠ Back left Egg, Inc. instead of closing a menu, so \"Press Back if a tap opens a menu\" was switched off")
+                append("\n↩ Closed ${capture.menusClosed} menus opened by mistake (by switching here and back)")
             }
             if (eggIncLaunchIntent() == null) append("\n⚠ Egg, Inc. isn't installed on this device")
         }
