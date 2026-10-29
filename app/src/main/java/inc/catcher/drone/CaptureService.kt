@@ -43,16 +43,13 @@ class CaptureService : Service() {
          */
         private const val MENU_CHECK_AFTER_MS = 800L
         private const val MENU_CHECK_UNTIL_MS = 2000L
-        private const val MENU_DIFFERENCE = 0.35f
+        private const val MENU_DIFFERENCE = 0.25f
 
         /** The menu counts as closed once the screen is this close to how it looked before the tap. */
         private const val MENU_CLOSED_DIFFERENCE = 0.2f
 
-        /** How long to stay in this app before reopening Egg, Inc. to close a menu. */
-        private const val REOPEN_DELAY_MS = 1000L
-
-        /** At most one switch away and back this often, so a mistaken menu can't bounce us around. */
-        private const val MIN_REOPEN_GAP_MS = 10_000L
+        /** At most one restart of Egg, Inc. this often, so a mistaken menu can't keep restarting it. */
+        private const val MIN_REOPEN_GAP_MS = 30_000L
 
         @Volatile
         var instance: CaptureService? = null
@@ -364,17 +361,15 @@ class CaptureService : Service() {
             }
             return
         }
-        // Switching to this app and back to Egg, Inc. closes the menu.
+        // Closing Egg, Inc. completely and starting it again gets rid of the menu.
         lastReopenMs = now
         main.post {
-            val svc = TapService.instance ?: return@post
-            if (!svc.isEggIncForeground() || !svc.openDroneCatcher()) return@post
-            main.postDelayed({
-                if (instance != null && TapService.instance?.bringEggIncToFront() == true) {
+            TapService.instance?.restartEggInc { relaunched ->
+                if (relaunched && instance != null) {
                     menusClosed++
                     refreshControls()
                 }
-            }, REOPEN_DELAY_MS)
+            }
         }
     }
 

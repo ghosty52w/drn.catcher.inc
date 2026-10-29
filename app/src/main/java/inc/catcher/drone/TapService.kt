@@ -34,6 +34,11 @@ class TapService : AccessibilityService() {
             private set
 
         private const val TAP_MS = 40L
+
+        /** Restarting Egg, Inc.: time for Recent apps to open, the swipe, and each step after. */
+        private const val RECENTS_OPEN_MS = 900L
+        private const val SWIPE_MS = 250L
+        private const val STEP_MS = 700L
         private const val ACTIVE_COLOR = 0xDD2E7D32.toInt()
         private const val PAUSED_COLOR = 0xDD424242.toInt()
     }
@@ -107,15 +112,42 @@ class TapService : AccessibilityService() {
         return dispatchGesture(gesture, null, null)
     }
 
-    /** Brings Drone Catcher's own screen to the front (leaving Egg, Inc. closes its menus). */
-    fun openDroneCatcher(): Boolean = try {
-        startActivity(
-            Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
-        )
-        true
-    } catch (e: RuntimeException) {
-        false
+    /**
+     * Closes Egg, Inc. completely and starts it again, which gets rid of any menu: opens
+     * Recent apps (where Egg, Inc., the app on screen, is the card in the middle), swipes
+     * that card away, goes home and launches Egg, Inc. [onDone] gets whether it relaunched.
+     */
+    fun restartEggInc(onDone: (Boolean) -> Unit) {
+        if (!isEggIncForeground() || !performGlobalAction(GLOBAL_ACTION_RECENTS)) {
+            onDone(false)
+            return
+        }
+        main.postDelayed({
+            val m = Screen.realMetrics(this)
+            val swipeUp = Path().apply {
+                moveTo(m.widthPixels / 2f, m.heightPixels * 0.55f)
+                lineTo(m.widthPixels / 2f, m.heightPixels * 0.05f)
+            }
+            val gesture = GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(swipeUp, 0, SWIPE_MS))
+                .build()
+            val relaunch: () -> Unit = {
+                main.postDelayed({
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    main.postDelayed({ onDone(bringEggIncToFront()) }, STEP_MS)
+                }, STEP_MS)
+            }
+            val sent = dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    relaunch()
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    relaunch()
+                }
+            }, null)
+            if (!sent) relaunch()
+        }, RECENTS_OPEN_MS)
     }
 
     /** Brings Egg, Inc. back to the front (resuming it if it's still running). */
